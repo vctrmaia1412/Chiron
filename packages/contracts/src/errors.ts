@@ -1,0 +1,74 @@
+import { z } from 'zod';
+
+/**
+ * Códigos de erro estáveis da API. O cliente pode reagir por código;
+ * a mensagem é para humanos e pode mudar.
+ */
+export const ERROR_CODES = [
+  'VALIDATION_FAILED',
+  'UNAUTHENTICATED',
+  'INVALID_CREDENTIALS',
+  'ACCOUNT_LOCKED',
+  'SESSION_EXPIRED',
+  'STEP_UP_REQUIRED',
+  'FORBIDDEN',
+  'NOT_FOUND',
+  'CONFLICT',
+  'CONTEXT_MISMATCH',
+  'TENANT_SUSPENDED',
+  'MEMBERSHIP_INACTIVE',
+  'MODULE_NOT_ENABLED',
+  'MODULE_SUSPENDED',
+  'LICENSE_REQUIRED',
+  'ENCOUNTER_LOCKED',
+  'INVALID_STATE_TRANSITION',
+  'MINIMUM_CONTENT_REQUIRED',
+  'NOT_OWNER',
+  'RATE_LIMITED',
+  'PAYLOAD_TOO_LARGE',
+  'UNSUPPORTED_MEDIA_TYPE',
+  'INSUFFICIENT_STOCK',
+  'LIMIT_REACHED',
+  'DEPENDENCY_REQUIRED',
+  'INTERNAL_ERROR',
+] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+export const apiErrorSchema = z.object({
+  code: z.enum(ERROR_CODES),
+  message: z.string(),
+  details: z.unknown().optional(),
+  requestId: z.string().optional(),
+});
+
+export type ApiError = z.infer<typeof apiErrorSchema>;
+
+export const HTTP_STATUS_BY_CODE: Record<ErrorCode, number> = {
+  VALIDATION_FAILED: 422,
+  UNAUTHENTICATED: 401,
+  INVALID_CREDENTIALS: 401,
+  ACCOUNT_LOCKED: 423,
+  SESSION_EXPIRED: 401,
+  STEP_UP_REQUIRED: 403,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  CONTEXT_MISMATCH: 409,
+  TENANT_SUSPENDED: 403,
+  MEMBERSHIP_INACTIVE: 403,
+  MODULE_NOT_ENABLED: 403,
+  MODULE_SUSPENDED: 403,
+  LICENSE_REQUIRED: 403,
+  ENCOUNTER_LOCKED: 409,
+  INVALID_STATE_TRANSITION: 409,
+  MINIMUM_CONTENT_REQUIRED: 422,
+  NOT_OWNER: 403,
+  RATE_LIMITED: 429,
+  PAYLOAD_TOO_LARGE: 413,
+  UNSUPPORTED_MEDIA_TYPE: 415,
+  INSUFFICIENT_STOCK: 409,
+  LIMIT_REACHED: 403,
+  DEPENDENCY_REQUIRED: 409,
+  INTERNAL_ERROR: 500,
+};
