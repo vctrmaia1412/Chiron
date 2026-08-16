@@ -1,0 +1,46 @@
+# Proxy do CHIRON.
+#
+# Web e API na mesma origem: o cookie de sessão fica same-origin e nenhuma
+# configuração de CORS é necessária. O caminho /api/v1 vai para a API e o
+# resto vai para o Next.js.
+#
+# Para HTTPS com domínio real, troque `:8080` pelo domínio e remova
+# `auto_https off`: o Caddy resolve o certificado sozinho.
+
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# Health do proxy, independente dos serviços atrás dele.
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	handle /api/* {
+		reverse_proxy api:3333 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

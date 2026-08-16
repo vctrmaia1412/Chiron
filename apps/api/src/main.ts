@@ -31,15 +31,23 @@ export async function createApp(): Promise<NestFastifyApplication> {
 
   // A sessão viaja em cookie, então a origem permitida é explícita e curta:
   // nada de `*`, que o navegador recusa junto de credenciais de qualquer forma.
+  // A mesma lista serve para o CORS e para a checagem de CSRF logo abaixo,
+  // para que as duas não divirjam com o tempo.
   const allowedOrigins = new Set(
-    [cfg.PUBLIC_APP_URL, ...(cfg.APP_ENV === 'dev' ? ['http://localhost:3000', 'http://127.0.0.1:3000'] : [])].filter(
-      Boolean,
-    ),
+    [
+      cfg.PUBLIC_APP_URL,
+      ...cfg.EXTRA_ALLOWED_ORIGINS.split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+      ...(cfg.APP_ENV === 'dev' ? ['http://localhost:3000', 'http://127.0.0.1:3000'] : []),
+    ].filter(Boolean),
   );
+
   app.enableCors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-      callback(new Error('Origem não permitida'), false);
+      // Origem desconhecida não vira erro 500: a resposta simplesmente sai sem
+      // os cabeçalhos de CORS, e o navegador barra do lado dele.
+      callback(null, !origin || allowedOrigins.has(origin));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
@@ -68,8 +76,7 @@ export async function createApp(): Promise<NestFastifyApplication> {
 
     const origin = request.headers.origin;
     if (!origin) return done(); // cliente não-browser
-    const allowed = new Set([cfg.PUBLIC_APP_URL, `http://localhost:${cfg.PORT}`]);
-    if (![...allowed].some((a) => origin.startsWith(a))) {
+    if (!allowedOrigins.has(origin)) {
       void reply.status(403).send({
         code: 'FORBIDDEN',
         message: 'Origem não permitida.',

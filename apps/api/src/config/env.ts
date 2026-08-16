@@ -41,6 +41,8 @@ const envSchema = z.object({
   FILES_PUBLIC_HOST: z.string().optional(),
 
   PUBLIC_APP_URL: z.string().default('http://localhost:3000'),
+  /** Origens extras permitidas, separadas por vírgula (proxy, domínio alternativo). */
+  EXTRA_ALLOWED_ORIGINS: z.string().default(''),
   API_PREFIX: z.string().default('/api/v1'),
 
   SESSION_SECRET: z.string().min(32),

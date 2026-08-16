@@ -20,7 +20,10 @@
     "infra:down": "docker compose -f infra/compose/docker-compose.dev.yml down",
     "infra:logs": "docker compose -f infra/compose/docker-compose.dev.yml logs -f",
     "infra:nuke": "docker compose -f infra/compose/docker-compose.dev.yml down -v",
-    "test:all": "pnpm test && pnpm test:integration"
+    "test:all": "pnpm test && pnpm test:integration",
+    "stack:up": "docker compose -f infra/compose/docker-compose.yml --env-file .env up -d --build",
+    "stack:down": "docker compose -f infra/compose/docker-compose.yml --env-file .env down",
+    "stack:logs": "docker compose -f infra/compose/docker-compose.yml --env-file .env logs -f"
   },
   "devDependencies": {
     "turbo": "^2.5.5",
