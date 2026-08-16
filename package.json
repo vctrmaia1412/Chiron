@@ -1,27 +1,37 @@
 {
-  "name": "app",
+  "name": "chiron",
   "version": "0.1.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.0.0"
   },
-  "dependencies": {
-    "lucide-react": "^1.31.0",
-    "next": "16.3.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "pnpm --filter @chiron/api test:integration",
+    "db:migrate": "pnpm --filter @chiron/api db:migrate",
+    "db:seed": "pnpm --filter @chiron/api db:seed",
+    "db:reset": "pnpm --filter @chiron/api db:reset",
+    "infra:up": "docker compose -f infra/compose/docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f infra/compose/docker-compose.dev.yml down",
+    "infra:logs": "docker compose -f infra/compose/docker-compose.dev.yml logs -f",
+    "infra:nuke": "docker compose -f infra/compose/docker-compose.dev.yml down -v"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.0",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "turbo": "^2.5.5",
+    "typescript": "^5.9.3",
+    "prettier": "^3.6.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "unrs-resolver",
+      "@node-rs/argon2",
+      "pdfkit"
+    ]
   }
 }
