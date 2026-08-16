@@ -70,7 +70,6 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
   }
 
   const statusInfo = statusFor(PATIENT_STATUS, patient.status);
-  const primaryGuardian = patient.guardians.find((g) => g.isPrimary) ?? patient.guardians[0] ?? null;
   const activeAlerts = patient.alerts.filter((alert) => alert.active);
   const activeAllergies = patient.allergies.filter((allergy) => allergy.status === 'active');
 

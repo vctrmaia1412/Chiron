@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
@@ -11,6 +11,7 @@ import { ROUTE } from '@/lib/labels';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/field';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
 interface ItemDraft {
   key: string;
@@ -61,7 +62,7 @@ function emptyItem(): ItemDraft {
  * de alergia antes de salvar. O cálculo mostrado aqui é o mesmo que o servidor
  * refaz: a regra vive no pacote de domínio, compartilhado pelos dois lados.
  */
-export function PrescriptionFormSheet({
+function PrescriptionFormSheetContent({
   open,
   onOpenChange,
   encounterId,
@@ -79,17 +80,8 @@ export function PrescriptionFormSheet({
   const queryClient = useQueryClient();
   const [items, setItems] = useState<ItemDraft[]>([emptyItem()]);
   const [notes, setNotes] = useState('');
-  const [allergyMatches, setAllergyMatches] = useState<Array<{ substance: string; matchedOn: string }>>([]);
 
   const weight = weightKg ? Number(weightKg) : null;
-
-  useEffect(() => {
-    if (open) {
-      setItems([emptyItem()]);
-      setNotes('');
-      setAllergyMatches([]);
-    }
-  }, [open]);
 
   const payloadItems = useMemo(
     () =>
@@ -128,9 +120,9 @@ export function PrescriptionFormSheet({
     enabled: open && payloadItems.length > 0,
   });
 
-  useEffect(() => {
-    if (allergyCheck.data) setAllergyMatches(allergyCheck.data.matches);
-  }, [allergyCheck.data]);
+  // O alerta vem direto da consulta: nada de copiar para estado e correr o
+  // risco de mostrar alergia de um item que já foi removido da receita.
+  const allergyMatches = allergyCheck.data?.matches ?? [];
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -403,5 +395,13 @@ export function PrescriptionFormSheet({
         </Field>
       </div>
     </Sheet>
+  );
+}
+
+export function PrescriptionFormSheet(props: React.ComponentProps<typeof PrescriptionFormSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <PrescriptionFormSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

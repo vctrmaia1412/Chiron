@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle } from 'lucide-react';
@@ -10,13 +10,14 @@ import { addDays, toIsoDate } from '@/lib/format';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/field';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
 /**
  * Finalizar assina as notas em rascunho e sela o atendimento com hash de
  * integridade. Se faltar conteúdo mínimo para o tipo de serviço, o servidor
  * recusa e a tela oferece a justificativa explícita, que também fica gravada.
  */
-export function FinishEncounterSheet({
+function FinishEncounterSheetContent({
   open,
   onOpenChange,
   encounter,
@@ -35,19 +36,6 @@ export function FinishEncounterSheet({
   const [justification, setJustification] = useState('');
   const [needsJustification, setNeedsJustification] = useState(false);
   const [minimumMessage, setMinimumMessage] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setDisposition('discharged');
-    setWantsFollowUp(false);
-    setFollowUpDueAt(toIsoDate(addDays(new Date(), 15)));
-    setFollowUpReason('Reavaliação clínica');
-    setReferralTo('');
-    setReferralReason('');
-    setJustification('');
-    setNeedsJustification(false);
-    setMinimumMessage('');
-  }, [open]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -176,5 +164,13 @@ export function FinishEncounterSheet({
         </p>
       </div>
     </Sheet>
+  );
+}
+
+export function FinishEncounterSheet(props: React.ComponentProps<typeof FinishEncounterSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <FinishEncounterSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

@@ -27,14 +27,7 @@ function PatientsList() {
   const [debounced, setDebounced] = useState('');
   const [speciesId, setSpeciesId] = useState('');
   const [status, setStatus] = useState('active');
-  const [formOpen, setFormOpen] = useState(false);
-
-  useEffect(() => {
-    if (params.get('novo')) {
-      setFormOpen(true);
-      router.replace('/pacientes');
-    }
-  }, [params, router]);
+  const [formOpen, setFormOpen] = useState(() => Boolean(params.get('novo')));
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(term.trim()), 250);

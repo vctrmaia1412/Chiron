@@ -238,7 +238,6 @@ export function normalizeObservation(input: {
   if (!spec) throw new DomainError('VALIDATION_FAILED', `Código de observação desconhecido: ${input.code}`);
 
   const enteredValue = String(input.value);
-  const enteredUom = input.uom ?? spec.canonicalUom;
 
   if (spec.valueKind === 'code') {
     const value = String(input.value).trim().toLowerCase();

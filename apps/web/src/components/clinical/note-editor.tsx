@@ -27,14 +27,20 @@ const PLACEHOLDER: Record<string, string> = {
 export function NoteEditor({ encounterId, notes }: { encounterId: string; notes: EncounterNote[] }) {
   return (
     <div className="space-y-3">
-      {SECTIONS.map((kind) => (
-        <NoteSection
-          key={kind}
-          encounterId={encounterId}
-          kind={kind}
-          existing={notes.find((note) => note.kind === kind) ?? null}
-        />
-      ))}
+      {SECTIONS.map((kind) => {
+        const existing = notes.find((note) => note.kind === kind) ?? null;
+        return (
+          <NoteSection
+            // A chave inclui id e versão: quando o servidor devolve uma versão
+            // nova da nota, a seção remonta com o texto atual, em vez de um
+            // efeito sincronizando estado por baixo do que está sendo digitado.
+            key={`${kind}-${existing?.id ?? 'nova'}-${existing?.version ?? 0}`}
+            encounterId={encounterId}
+            kind={kind}
+            existing={existing}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -54,10 +60,6 @@ function NoteSection({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locked = existing?.status === 'final' || existing?.status === 'amended';
-
-  useEffect(() => {
-    if (!dirty) setValue(existing?.body ?? '');
-  }, [existing?.body, dirty]);
 
   const mutation = useMutation({
     mutationFn: (body: string) => api.post(`/encounters/${encounterId}/notes`, { kind, body }),

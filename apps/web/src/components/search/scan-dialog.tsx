@@ -24,7 +24,7 @@ interface ScanResult {
  * BarcodeDetector quando o navegador oferece. A interpretação do conteúdo é
  * do servidor, então nenhuma dessas origens muda a regra.
  */
-export function ScanDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function ScanDialogContent({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -35,28 +35,22 @@ export function ScanDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
-  const [cameraSupported, setCameraSupported] = useState(false);
-
-  useEffect(() => {
-    setCameraSupported(
+  // Capacidade do navegador é lida uma vez, na montagem, e não muda depois.
+  const [cameraSupported] = useState(
+    () =>
       typeof window !== 'undefined' &&
-        'BarcodeDetector' in window &&
-        Boolean(navigator.mediaDevices?.getUserMedia),
-    );
-  }, []);
+      'BarcodeDetector' in window &&
+      Boolean(navigator.mediaDevices?.getUserMedia),
+  );
 
   useEffect(() => {
-    if (!open) {
-      stopCamera();
-      setCode('');
-      setResult(null);
-      setError(null);
-    } else {
-      setTimeout(() => inputRef.current?.focus(), 120);
-    }
-    return () => stopCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+    const timer = setTimeout(() => inputRef.current?.focus(), 120);
+    return () => {
+      clearTimeout(timer);
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
+  }, []);
 
   function stopCamera() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -224,4 +218,10 @@ export function ScanDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       )}
     </Sheet>
   );
+}
+
+export function ScanDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  // Fechar a folha desliga a câmera e limpa o código: o componente deixa de
+  // existir, então não sobra estado nem stream aberto.
+  return props.open ? <ScanDialogContent {...props} /> : null;
 }

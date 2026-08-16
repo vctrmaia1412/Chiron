@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { FlaskConical, Plus } from 'lucide-react';
@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
 import { Checkbox, Field, Select, Textarea } from '@/components/ui/field';
 import { ExamOrderCard } from '@/components/lab/exam-order-card';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
 export function EncounterExams({
   encounterId,
@@ -82,7 +83,7 @@ export function EncounterExams({
   );
 }
 
-export function ExamOrderSheet({
+function ExamOrderSheetContent({
   open,
   onOpenChange,
   encounterId,
@@ -105,15 +106,6 @@ export function ExamOrderSheet({
     queryFn: () => api.get<{ items: Array<{ id: string; name: string; isInternal: boolean }> }>('/exam-orders/laboratories'),
     enabled: open,
   });
-
-  useEffect(() => {
-    if (open) {
-      setSelected([]);
-      setPriority('routine');
-      setClinicalInfo('');
-      setLaboratoryId('');
-    }
-  }, [open]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -239,5 +231,13 @@ export function ExamOrderSheet({
         </div>
       </div>
     </Sheet>
+  );
+}
+
+export function ExamOrderSheet(props: React.ComponentProps<typeof ExamOrderSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <ExamOrderSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

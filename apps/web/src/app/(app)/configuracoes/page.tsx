@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { MODULES, type ModuleKey } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { useSession } from '@/lib/session';
-import { Badge, Card, CardHeader, DataRow, ListSkeleton, PageHeader, SectionTitle } from '@/components/ui/primitives';
+import { Badge, Card, CardHeader, ListSkeleton, PageHeader } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Textarea } from '@/components/ui/field';
 import { Tabs } from '@/components/ui/tabs';
@@ -40,7 +40,9 @@ export default function SettingsPage() {
         ]}
       />
 
-      {tab === 'organizacao' && <OrganizationPanel />}
+      {/* A chave é o tenant: trocar de organização remonta o painel com os
+          valores da nova, sem efeito copiando dado para estado. */}
+      {tab === 'organizacao' && <OrganizationPanel key={context?.tenant?.id ?? 'sem-tenant'} />}
       {tab === 'equipe' && <MembersPanel />}
       {tab === 'modulos' && <ModulesPanel />}
       {tab === 'catalogos' && <CatalogPanel />}
@@ -52,8 +54,10 @@ function OrganizationPanel() {
   const queryClient = useQueryClient();
   const { context, can, refresh } = useSession();
 
-  const [name, setName] = useState('');
-  const [prescriptionHeader, setPrescriptionHeader] = useState('');
+  const [name, setName] = useState(context?.tenant?.name ?? '');
+  const [prescriptionHeader, setPrescriptionHeader] = useState(
+    String(context?.tenant?.settings?.prescriptionHeader ?? ''),
+  );
 
   const { data: facilities } = useQuery({
     queryKey: ['facilities'],
@@ -63,13 +67,6 @@ function OrganizationPanel() {
       ),
     enabled: can('facility:read'),
   });
-
-  useEffect(() => {
-    if (context?.tenant) {
-      setName(context.tenant.name);
-      setPrescriptionHeader(String(context.tenant.settings?.prescriptionHeader ?? ''));
-    }
-  }, [context?.tenant]);
 
   const mutation = useMutation({
     mutationFn: () =>

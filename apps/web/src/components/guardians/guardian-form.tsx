@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { Guardian } from '@chiron/contracts';
@@ -9,8 +9,9 @@ import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
 import { SectionTitle } from '@/components/ui/primitives';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
-export function GuardianFormSheet({
+function GuardianFormSheetContent({
   open,
   onOpenChange,
   guardian,
@@ -24,63 +25,27 @@ export function GuardianFormSheet({
   const queryClient = useQueryClient();
   const editing = Boolean(guardian);
 
-  const [personType, setPersonType] = useState<'individual' | 'company'>('individual');
-  const [name, setName] = useState('');
-  const [legalName, setLegalName] = useState('');
-  const [documentKind, setDocumentKind] = useState<'cpf' | 'cnpj' | 'passport' | 'none'>('cpf');
+  // Estado inicial vem do tutor em edição: a folha só monta quando abre.
+  const [personType, setPersonType] = useState<'individual' | 'company'>(guardian?.personType ?? 'individual');
+  const [name, setName] = useState(guardian?.name ?? '');
+  const [legalName, setLegalName] = useState(guardian?.legalName ?? '');
+  const [documentKind, setDocumentKind] = useState<'cpf' | 'cnpj' | 'passport' | 'none'>(
+    guardian?.documentKind ?? 'cpf',
+  );
+  // Documento nunca volta em claro do servidor: em branco mantém o atual.
   const [document, setDocument] = useState('');
-  const [email, setEmail] = useState('');
-  const [phonePrimary, setPhonePrimary] = useState('');
-  const [phoneSecondary, setPhoneSecondary] = useState('');
-  const [birthDate, setBirthDate] = useState('');
-  const [zipCode, setZipCode] = useState('');
-  const [street, setStreet] = useState('');
-  const [number, setNumber] = useState('');
-  const [district, setDistrict] = useState('');
-  const [city, setCity] = useState('');
-  const [state, setState] = useState('');
-  const [notes, setNotes] = useState('');
+  const [email, setEmail] = useState(guardian?.email ?? '');
+  const [phonePrimary, setPhonePrimary] = useState(guardian?.phonePrimary ?? '');
+  const [phoneSecondary, setPhoneSecondary] = useState(guardian?.phoneSecondary ?? '');
+  const [birthDate, setBirthDate] = useState(guardian?.birthDate ?? '');
+  const [zipCode, setZipCode] = useState(guardian?.address?.zipCode ?? '');
+  const [street, setStreet] = useState(guardian?.address?.street ?? '');
+  const [number, setNumber] = useState(guardian?.address?.number ?? '');
+  const [district, setDistrict] = useState(guardian?.address?.district ?? '');
+  const [city, setCity] = useState(guardian?.address?.city ?? '');
+  const [state, setState] = useState(guardian?.address?.state ?? '');
+  const [notes, setNotes] = useState(guardian?.notes ?? '');
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!open) return;
-    setErrors({});
-    if (guardian) {
-      setPersonType(guardian.personType);
-      setName(guardian.name);
-      setLegalName(guardian.legalName ?? '');
-      setDocumentKind(guardian.documentKind);
-      setDocument('');
-      setEmail(guardian.email ?? '');
-      setPhonePrimary(guardian.phonePrimary ?? '');
-      setPhoneSecondary(guardian.phoneSecondary ?? '');
-      setBirthDate(guardian.birthDate ?? '');
-      setZipCode(guardian.address?.zipCode ?? '');
-      setStreet(guardian.address?.street ?? '');
-      setNumber(guardian.address?.number ?? '');
-      setDistrict(guardian.address?.district ?? '');
-      setCity(guardian.address?.city ?? '');
-      setState(guardian.address?.state ?? '');
-      setNotes(guardian.notes ?? '');
-    } else {
-      setPersonType('individual');
-      setName('');
-      setLegalName('');
-      setDocumentKind('cpf');
-      setDocument('');
-      setEmail('');
-      setPhonePrimary('');
-      setPhoneSecondary('');
-      setBirthDate('');
-      setZipCode('');
-      setStreet('');
-      setNumber('');
-      setDistrict('');
-      setCity('');
-      setState('');
-      setNotes('');
-    }
-  }, [open, guardian]);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -286,5 +251,13 @@ export function GuardianFormSheet({
         </Field>
       </div>
     </Sheet>
+  );
+}
+
+export function GuardianFormSheet(props: React.ComponentProps<typeof GuardianFormSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <GuardianFormSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

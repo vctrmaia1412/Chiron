@@ -1,19 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { EncounterDetail } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { useProfessionals, useServices } from '@/lib/catalog';
-import { useSession } from '@/lib/session';
+
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select } from '@/components/ui/field';
 import { PatientPicker, type PatientPickerValue } from '@/components/patients/patient-picker';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
 /** Atendimento sem agendamento prévio: walk-in e urgência. */
-export function WalkInSheet({
+function WalkInSheetContent({
   open,
   onOpenChange,
   onCreated,
@@ -23,7 +24,6 @@ export function WalkInSheet({
   onCreated?: (encounterId: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const { context } = useSession();
   const { data: services = [] } = useServices();
   const { data: professionals = [] } = useProfessionals();
 
@@ -33,16 +33,6 @@ export function WalkInSheet({
   const [professionalId, setProfessionalId] = useState('');
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!open) return;
-    setPatient(null);
-    setServiceId(services.find((service) => service.key === 'consulta')?.id ?? services[0]?.id ?? '');
-    setEncounterClass('outpatient');
-    setProfessionalId(context?.membership?.professionalId ?? '');
-    setChiefComplaint('');
-    setErrors({});
-  }, [open, services, context?.membership?.professionalId]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -138,5 +128,13 @@ export function WalkInSheet({
         </Field>
       </div>
     </Sheet>
+  );
+}
+
+export function WalkInSheet(props: React.ComponentProps<typeof WalkInSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <WalkInSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

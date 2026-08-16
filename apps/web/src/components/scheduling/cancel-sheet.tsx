@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { Appointment } from '@chiron/contracts';
@@ -18,7 +18,7 @@ const REASONS = [
   'Erro de agendamento',
 ];
 
-export function CancelAppointmentSheet({
+function CancelAppointmentSheetContent({
   appointment,
   onClose,
 }: {
@@ -29,14 +29,6 @@ export function CancelAppointmentSheet({
   const [reason, setReason] = useState(REASONS[0]!);
   const [detail, setDetail] = useState('');
   const [markNoShow, setMarkNoShow] = useState(false);
-
-  useEffect(() => {
-    if (appointment) {
-      setReason(REASONS[0]!);
-      setDetail('');
-      setMarkNoShow(false);
-    }
-  }, [appointment]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -112,4 +104,8 @@ export function CancelAppointmentSheet({
       </div>
     </Sheet>
   );
+}
+
+export function CancelAppointmentSheet(props: React.ComponentProps<typeof CancelAppointmentSheetContent>) {
+  return props.appointment ? <CancelAppointmentSheetContent {...props} /> : null;
 }

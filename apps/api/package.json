@@ -8,7 +8,7 @@
     "dev": "nest start --watch --preserveWatchOutput",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src --ext .ts --max-warnings 0",
+    "lint": "eslint src test --max-warnings 0",
     "test": "vitest run --dir src --passWithNoTests",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:migrate": "tsx src/database/migrate.ts",

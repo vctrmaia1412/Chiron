@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MeContext, ModuleKey, ModuleState } from '@chiron/contracts';
@@ -31,7 +31,6 @@ const SessionContext = createContext<SessionValue | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [expired, setExpired] = useState(false);
 
   const query = useQuery({
     queryKey: ['me-context'],
@@ -50,17 +49,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setActiveTenantId(context?.tenant?.id ?? null);
   }, [context?.tenant?.id]);
 
+  // Sessão expirada é evento externo: o cliente de API avisa e o redirecionamento
+  // acontece na hora, sem passar por estado intermediário.
   useEffect(() => {
-    setUnauthenticatedHandler(() => setExpired(true));
+    setUnauthenticatedHandler(() => {
+      queryClient.clear();
+      router.replace('/entrar?expirada=1');
+    });
     return () => setUnauthenticatedHandler(null);
-  }, []);
-
-  useEffect(() => {
-    if (!expired) return;
-    setExpired(false);
-    queryClient.clear();
-    router.replace('/entrar?expirada=1');
-  }, [expired, queryClient, router]);
+  }, [queryClient, router]);
 
   const permissions = useMemo(() => new Set(context?.permissions ?? []), [context?.permissions]);
 

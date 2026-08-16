@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { ExamOrderItem } from '@chiron/contracts';
@@ -24,50 +24,46 @@ interface ValueDraft {
  * novo, o servidor cria uma retificação que supersede a anterior e mantém as
  * duas versões visíveis.
  */
-export function ExamResultSheet({ item, onClose }: { item: ExamOrderItem | null; onClose: () => void }) {
+function ExamResultSheetContent({ item, onClose }: { item: ExamOrderItem | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data: catalog = [] } = useExamCatalog(Boolean(item));
-
-  const [values, setValues] = useState<ValueDraft[]>([]);
-  const [reportText, setReportText] = useState('');
-  const [interpretation, setInterpretation] = useState('');
-  const [status, setStatus] = useState<'preliminary' | 'final'>('final');
 
   const analytes = useMemo(() => {
     const entry = catalog.find((exam) => exam.id === item?.examCatalogId);
     return entry?.analytes ?? [];
   }, [catalog, item?.examCatalogId]);
 
-  useEffect(() => {
-    if (!item) return;
-    const existing = item.result?.values ?? [];
+  // Linhas existentes vêm do resultado anterior; sem resultado, do catálogo de
+  // analitos do exame. Derivado, não copiado por efeito.
+  const initialValues = useMemo<ValueDraft[]>(() => {
+    const existing = item?.result?.values ?? [];
     if (existing.length > 0) {
-      setValues(
-        existing.map((value) => ({
-          analyteCode: value.analyteCode,
-          analyteName: value.analyteName,
-          uom: value.uom,
-          value: value.valueNumeric ?? value.valueText ?? '',
-          refMin: value.refMin ?? '',
-          refMax: value.refMax ?? '',
-        })),
-      );
-    } else {
-      setValues(
-        analytes.map((analyte) => ({
-          analyteCode: analyte.code,
-          analyteName: analyte.name,
-          uom: analyte.uom,
-          value: '',
-          refMin: '',
-          refMax: '',
-        })),
-      );
+      return existing.map((value) => ({
+        analyteCode: value.analyteCode,
+        analyteName: value.analyteName,
+        uom: value.uom,
+        value: value.valueNumeric ?? value.valueText ?? '',
+        refMin: value.refMin ?? '',
+        refMax: value.refMax ?? '',
+      }));
     }
-    setReportText(item.result?.reportText ?? '');
-    setInterpretation(item.result?.interpretation ?? '');
-    setStatus('final');
-  }, [item, analytes]);
+    return analytes.map((analyte) => ({
+      analyteCode: analyte.code,
+      analyteName: analyte.name,
+      uom: analyte.uom,
+      value: '',
+      refMin: '',
+      refMax: '',
+    }));
+  }, [item?.result?.values, analytes]);
+
+  const [edited, setEdited] = useState<ValueDraft[] | null>(null);
+  const values = edited ?? initialValues;
+  const setValues = (updater: (current: ValueDraft[]) => ValueDraft[]) => setEdited(updater(values));
+
+  const [reportText, setReportText] = useState(item?.result?.reportText ?? '');
+  const [interpretation, setInterpretation] = useState(item?.result?.interpretation ?? '');
+  const [status, setStatus] = useState<'preliminary' | 'final'>('final');
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -194,4 +190,9 @@ export function ExamResultSheet({ item, onClose }: { item: ExamOrderItem | null;
       </div>
     </Sheet>
   );
+}
+
+export function ExamResultSheet(props: React.ComponentProps<typeof ExamResultSheetContent>) {
+  // Cada lançamento monta do zero, com os valores do item escolhido.
+  return props.item ? <ExamResultSheetContent key={props.item.id} {...props} /> : null;
 }

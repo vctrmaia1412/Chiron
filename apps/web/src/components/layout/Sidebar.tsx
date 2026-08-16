@@ -12,7 +12,7 @@ import { NAV_ITEMS, isActivePath } from './navigation';
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { context, can, hasModule } = useSession();
+  const { can, hasModule } = useSession();
 
   const items = NAV_ITEMS.filter((item) => hasModule(item.module) && can(item.permission));
 

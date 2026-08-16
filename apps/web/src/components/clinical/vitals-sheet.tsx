@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
@@ -8,13 +8,14 @@ import { useObservationCodes, useSpecies } from '@/lib/catalog';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
 /**
  * O painel de sinais vitais segue a espécie: bovino ganha motilidade ruminal,
  * réptil ganha temperatura ambiente, ave não mostra tempo de preenchimento
  * capilar. A lista vem do catálogo, não de uma constante no frontend.
  */
-export function VitalsSheet({
+function VitalsSheetContent({
   open,
   onOpenChange,
   encounterId,
@@ -42,13 +43,6 @@ export function VitalsSheet({
     if (allowed.length === 0) return ordered.filter((code) => code.code !== 'weight');
     return ordered.filter((code) => allowed.includes(code.code));
   }, [codes, species, speciesCode]);
-
-  useEffect(() => {
-    if (!open) return;
-    setValues({});
-    setNote('');
-    setUoms(Object.fromEntries(panel.map((code) => [code.code, code.canonicalUom ?? ''])));
-  }, [open, panel]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -161,5 +155,13 @@ export function VitalsSheet({
         )}
       </div>
     </Sheet>
+  );
+}
+
+export function VitalsSheet(props: React.ComponentProps<typeof VitalsSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <VitalsSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

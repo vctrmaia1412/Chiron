@@ -24,7 +24,7 @@ const GROUP_LABEL: Record<SearchResult['type'], string> = {
   encounter: 'Atendimentos',
 };
 
-export function GlobalSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function GlobalSearchPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const router = useRouter();
   const [term, setTerm] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -33,28 +33,6 @@ export function GlobalSearch({ open, onOpenChange }: { open: boolean; onOpenChan
     const timer = setTimeout(() => setDebounced(term.trim()), 220);
     return () => clearTimeout(timer);
   }, [term]);
-
-  useEffect(() => {
-    if (!open) {
-      setTerm('');
-      setDebounced('');
-    }
-  }, [open]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const typingInField =
-        target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
-      if (typingInField) return;
-      if (event.key === '/' || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) {
-        event.preventDefault();
-        onOpenChange(true);
-      }
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onOpenChange]);
 
   const { data, isFetching } = useQuery({
     queryKey: ['search', debounced],
@@ -140,4 +118,28 @@ export function GlobalSearch({ open, onOpenChange }: { open: boolean; onOpenChan
       </div>
     </Sheet>
   );
+}
+
+export function GlobalSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  // O atalho de teclado precisa existir mesmo com a busca fechada, então fica
+  // aqui fora; o painel em si só monta ao abrir, com o campo já vazio.
+  useSearchShortcut(onOpenChange);
+  return open ? <GlobalSearchPanel open={open} onOpenChange={onOpenChange} /> : null;
+}
+
+function useSearchShortcut(onOpenChange: (open: boolean) => void) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const typingInField =
+        target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
+      if (typingInField) return;
+      if (event.key === '/' || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) {
+        event.preventDefault();
+        onOpenChange(true);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onOpenChange]);
 }

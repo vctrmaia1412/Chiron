@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { Appointment } from '@chiron/contracts';
@@ -15,7 +15,7 @@ import { Field, Input, Select, Textarea } from '@/components/ui/field';
  * entra como primeira observação e passa a valer para o cálculo de dose, que
  * é o motivo de ele ser pedido aqui e não depois.
  */
-export function CheckInSheet({
+function CheckInSheetContent({
   appointment,
   onClose,
   onCheckedIn,
@@ -28,14 +28,6 @@ export function CheckInSheet({
   const [weight, setWeight] = useState('');
   const [weightUom, setWeightUom] = useState<'kg' | 'g'>('kg');
   const [notes, setNotes] = useState('');
-
-  useEffect(() => {
-    if (appointment) {
-      setWeight('');
-      setWeightUom('kg');
-      setNotes('');
-    }
-  }, [appointment]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -124,4 +116,9 @@ export function CheckInSheet({
       </div>
     </Sheet>
   );
+}
+
+export function CheckInSheet(props: React.ComponentProps<typeof CheckInSheetContent>) {
+  // Só existe com um agendamento alvo: o formulário nasce limpo a cada uso.
+  return props.appointment ? <CheckInSheetContent {...props} /> : null;
 }

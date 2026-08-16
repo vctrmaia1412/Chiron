@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
@@ -8,6 +8,7 @@ import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
 import { PatientPicker, type PatientPickerValue } from '@/components/patients/patient-picker';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
 interface TemplateDefinition {
   key: string;
@@ -69,7 +70,7 @@ const TEMPLATES: TemplateDefinition[] = [
   { key: 'medical_record', label: 'Prontuário completo', fields: [] },
 ];
 
-export function GenerateDocumentSheet({
+function GenerateDocumentSheetContent({
   open,
   onOpenChange,
   presetPatientId,
@@ -86,14 +87,6 @@ export function GenerateDocumentSheet({
   const [fields, setFields] = useState<Record<string, string>>({});
 
   const template = TEMPLATES.find((item) => item.key === templateKey)!;
-
-  useEffect(() => {
-    if (open) {
-      setTemplateKey(TEMPLATES[0]!.key);
-      setFields({});
-      if (!presetPatientId) setPatient(null);
-    }
-  }, [open, presetPatientId]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -172,5 +165,13 @@ export function GenerateDocumentSheet({
         </p>
       </div>
     </Sheet>
+  );
+}
+
+export function GenerateDocumentSheet(props: React.ComponentProps<typeof GenerateDocumentSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <GenerateDocumentSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

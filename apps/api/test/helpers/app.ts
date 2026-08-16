@@ -13,6 +13,9 @@ export interface TestClient {
     cookie?: string;
     tenant?: string;
     headers?: Record<string, string>;
+    // O corpo é JSON cru da resposta: o teste é justamente quem confere o
+    // formato, então tipar aqui esconderia o que ele deveria verificar.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }) => Promise<{ status: number; body: any; cookie: string | undefined; headers: Record<string, unknown> }>;
   login: (email: string, password?: string, tenantSlug?: string) => Promise<Session>;
   close: () => Promise<void>;
@@ -50,7 +53,7 @@ export async function createTestClient(): Promise<TestClient> {
     const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [String(setCookie)] : [];
     const session = cookies.find((c) => c.startsWith(`${COOKIE_NAME}=`));
 
-    let body: unknown = null;
+    let body: unknown;
     try {
       body = response.body ? JSON.parse(response.body) : null;
     } catch {

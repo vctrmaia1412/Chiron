@@ -1,6 +1,6 @@
 import { Client } from 'pg';
 import { hash as argonHash } from '@node-rs/argon2';
-import { LICENSE_REQUIRED_PERMISSIONS, PLANS, ROLE_TEMPLATES } from '@chiron/contracts';
+import { PLANS, ROLE_TEMPLATES } from '@chiron/contracts';
 import { env } from '../config/env';
 import { CryptoService } from '../common/crypto.service';
 import { uuidv7 } from '../common/uuid';
@@ -597,7 +597,6 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
 
     // ----------------------------------------------------------- pacientes
     const patientIds = new Map<string, string>();
-    const ownerVetKeys = ['vet1', 'vet2', 'vet3'];
     for (const patient of PATIENTS) {
       const speciesId = speciesByCode.get(patient.speciesCode);
       if (!speciesId) throw new Error(`Espécie ${patient.speciesCode} não encontrada.`);

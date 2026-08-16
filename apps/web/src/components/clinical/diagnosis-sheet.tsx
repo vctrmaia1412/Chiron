@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
-export function DiagnosisSheet({
+function DiagnosisSheetContent({
   open,
   onOpenChange,
   encounterId,
@@ -21,14 +22,6 @@ export function DiagnosisSheet({
   const [description, setDescription] = useState('');
   const [kind, setKind] = useState<'differential' | 'presumptive' | 'final' | 'ruled_out'>('presumptive');
   const [notes, setNotes] = useState('');
-
-  useEffect(() => {
-    if (open) {
-      setDescription('');
-      setKind('presumptive');
-      setNotes('');
-    }
-  }, [open]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -96,5 +89,13 @@ export function DiagnosisSheet({
         </Field>
       </div>
     </Sheet>
+  );
+}
+
+export function DiagnosisSheet(props: React.ComponentProps<typeof DiagnosisSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <DiagnosisSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

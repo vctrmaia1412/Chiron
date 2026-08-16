@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Syringe } from 'lucide-react';
@@ -13,6 +13,7 @@ import { Badge, Card, CardHeader, EmptyState, ListSkeleton } from '@/components/
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
 export function EncounterImmunizations({
   encounterId,
@@ -140,7 +141,7 @@ export function EncounterImmunizations({
   );
 }
 
-export function VaccineSheet({
+function VaccineSheetContent({
   open,
   onOpenChange,
   encounterId,
@@ -161,19 +162,6 @@ export function VaccineSheet({
   const [doseNumber, setDoseNumber] = useState('');
   const [nextDueAt, setNextDueAt] = useState(toIsoDate(addDays(new Date(), 365)));
   const [reactionNotes, setReactionNotes] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setVaccineName('');
-    setManufacturer('');
-    setLotNumber('');
-    setExpiresAt('');
-    setRoute('sc');
-    setSite('');
-    setDoseNumber('');
-    setNextDueAt(toIsoDate(addDays(new Date(), 365)));
-    setReactionNotes('');
-  }, [open]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -299,15 +287,6 @@ function PreventiveSheet({
   const [nextDueAt, setNextDueAt] = useState(toIsoDate(addDays(new Date(), 90)));
   const [notes, setNotes] = useState('');
 
-  useEffect(() => {
-    if (!open) return;
-    setProductName('');
-    setKind('deworming');
-    setDoseText('');
-    setNextDueAt(toIsoDate(addDays(new Date(), 90)));
-    setNotes('');
-  }, [open]);
-
   const mutation = useMutation({
     mutationFn: () =>
       api.post('/immunizations/preventives', {
@@ -381,5 +360,13 @@ function PreventiveSheet({
         </Field>
       </div>
     </Sheet>
+  );
+}
+
+export function VaccineSheet(props: React.ComponentProps<typeof VaccineSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <VaccineSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

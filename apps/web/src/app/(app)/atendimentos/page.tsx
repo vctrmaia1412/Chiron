@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -27,13 +27,11 @@ function EncountersList() {
   const router = useRouter();
   const params = useSearchParams();
   const { can } = useSession();
-  const [filter, setFilter] = useState('abertos');
-  const [walkInOpen, setWalkInOpen] = useState(false);
-
-  useEffect(() => {
+  const [filter, setFilter] = useState(() => {
     const preset = params.get('filtro');
-    if (preset && FILTERS.some((item) => item.key === preset)) setFilter(preset);
-  }, [params]);
+    return preset && FILTERS.some((item) => item.key === preset) ? preset : 'abertos';
+  });
+  const [walkInOpen, setWalkInOpen] = useState(false);
 
   const query = (() => {
     switch (filter) {

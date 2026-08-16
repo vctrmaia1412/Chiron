@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Copy, UserPlus } from 'lucide-react';
@@ -158,7 +158,7 @@ export function MembersPanel() {
   );
 }
 
-function InviteSheet({
+function InviteSheetContent({
   open,
   onOpenChange,
   roles,
@@ -170,28 +170,20 @@ function InviteSheet({
   const queryClient = useQueryClient();
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [roleKey, setRoleKey] = useState('');
+  const [chosenRoleKey, setChosenRoleKey] = useState('');
   const [isProfessional, setIsProfessional] = useState(false);
   const [councilNumber, setCouncilNumber] = useState('');
   const [councilState, setCouncilState] = useState('SP');
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (open) {
-      setEmail('');
-      setName('');
-      setRoleKey(roles.find((role) => role.key === 'veterinarian')?.key ?? roles[0]?.key ?? '');
-      setIsProfessional(false);
-      setCouncilNumber('');
-      setInviteUrl(null);
-    }
-  }, [open, roles]);
+  const roleKey =
+    chosenRoleKey || roles.find((role) => role.key === 'veterinarian')?.key || roles[0]?.key || '';
 
   const selectedRole = roles.find((role) => role.key === roleKey);
-
-  useEffect(() => {
-    if (selectedRole?.requiresLicense) setIsProfessional(true);
-  }, [selectedRole?.requiresLicense]);
+  // Papel que assina documento clínico sempre exige registro de conselho:
+  // a marcação é derivada, não copiada para o estado por um efeito.
+  const requiresProfessional = Boolean(selectedRole?.requiresLicense);
+  const isProfessionalEffective = requiresProfessional || isProfessional;
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -201,7 +193,7 @@ function InviteSheet({
         roleKey,
         allFacilities: true,
         professional:
-          isProfessional && councilNumber.trim()
+          isProfessionalEffective && councilNumber.trim()
             ? {
                 council: 'CRMV',
                 councilNumber: councilNumber.trim(),
@@ -276,7 +268,7 @@ function InviteSheet({
             <Input value={name} onChange={(event) => setName(event.target.value)} />
           </Field>
           <Field label="Papel" required>
-            <Select value={roleKey} onChange={(event) => setRoleKey(event.target.value)}>
+            <Select value={roleKey} onChange={(event) => setChosenRoleKey(event.target.value)}>
               {roles.map((role) => (
                 <option key={role.key} value={role.key}>
                   {role.name}
@@ -286,13 +278,13 @@ function InviteSheet({
           </Field>
 
           <Checkbox
-            checked={isProfessional}
-            disabled={selectedRole?.requiresLicense}
+            checked={isProfessionalEffective}
+            disabled={requiresProfessional}
             onChange={(event) => setIsProfessional(event.target.checked)}
             label="Cadastrar como profissional com registro de conselho"
           />
 
-          {isProfessional && (
+          {isProfessionalEffective && (
             <div className="grid grid-cols-[1fr_80px] gap-3">
               <Field label="Número do CRMV" required>
                 <Input value={councilNumber} onChange={(event) => setCouncilNumber(event.target.value)} />
@@ -316,4 +308,8 @@ function InviteSheet({
       )}
     </Sheet>
   );
+}
+
+function InviteSheet(props: React.ComponentProps<typeof InviteSheetContent>) {
+  return props.open ? <InviteSheetContent {...props} /> : null;
 }

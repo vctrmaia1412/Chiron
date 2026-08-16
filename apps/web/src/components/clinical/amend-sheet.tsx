@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
@@ -12,7 +12,7 @@ import { Field, Input, Textarea } from '@/components/ui/field';
  * Adendo em nota assinada. Não sobrescreve: cria uma nova versão que supersede
  * a anterior, e a anterior continua no prontuário marcada como substituída.
  */
-export function AmendNoteSheet({
+function AmendNoteSheetContent({
   encounterId,
   noteId,
   onClose,
@@ -24,13 +24,6 @@ export function AmendNoteSheet({
   const queryClient = useQueryClient();
   const [body, setBody] = useState('');
   const [reason, setReason] = useState('');
-
-  useEffect(() => {
-    if (noteId) {
-      setBody('');
-      setReason('');
-    }
-  }, [noteId]);
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/encounters/${encounterId}/notes/${noteId}/amend`, { body: body.trim(), reason: reason.trim() }),
@@ -83,4 +76,9 @@ export function AmendNoteSheet({
       </div>
     </Sheet>
   );
+}
+
+export function AmendNoteSheet(props: React.ComponentProps<typeof AmendNoteSheetContent>) {
+  // Cada adendo começa em branco: o componente só existe com uma nota alvo.
+  return props.noteId ? <AmendNoteSheetContent {...props} /> : null;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -30,16 +30,13 @@ function AgendaView() {
   const [day, setDay] = useState(() => new Date());
   const [professionalId, setProfessionalId] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [formOpen, setFormOpen] = useState(false);
+  // A URL é a fonte do estado inicial: o inicializador lê o parâmetro uma vez,
+  // sem efeito copiando valor e disparando renderização em cascata.
+  const [formOpen, setFormOpen] = useState(() => Boolean(params.get('novo')));
   const [checkInTarget, setCheckInTarget] = useState<Appointment | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
-  const [showFollowUps, setShowFollowUps] = useState(false);
+  const [showFollowUps, setShowFollowUps] = useState(() => Boolean(params.get('retornos')));
   const presetPatientId = params.get('pacienteId') ?? undefined;
-
-  useEffect(() => {
-    if (params.get('novo')) setFormOpen(true);
-    if (params.get('retornos')) setShowFollowUps(true);
-  }, [params]);
 
   const range = useMemo(() => ({ from: startOfDay(day).toISOString(), to: endOfDay(day).toISOString() }), [day]);
 

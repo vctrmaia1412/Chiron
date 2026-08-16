@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
@@ -18,13 +18,11 @@ function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    params.get('expirada') ? 'Sua sessão expirou. Entre novamente para continuar.' : null,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [tenants, setTenants] = useState<TenantSummary[] | null>(null);
-
-  useEffect(() => {
-    if (params.get('expirada')) setError('Sua sessão expirou. Entre novamente para continuar.');
-  }, [params]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();

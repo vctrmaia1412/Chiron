@@ -4,24 +4,13 @@ import { use, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  FlaskConical,
-  Pause,
-  Pill,
-  Play,
-  RotateCcw,
-  ScrollText,
-  Syringe,
-} from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, Pause, Play, RotateCcw, ScrollText } from 'lucide-react';
 import type { EncounterDetail, Patient } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { formatDateTime, formatWeight, relativeTime } from '@/lib/format';
 import { DISPOSITION, ENCOUNTER_CLASS, ENCOUNTER_STATUS, labelFor, statusFor } from '@/lib/labels';
 import { useSession } from '@/lib/session';
-import { Badge, Card, CardHeader, ErrorState, PageHeader, SectionTitle, Skeleton } from '@/components/ui/primitives';
+import { Badge, Card, CardHeader, ErrorState, PageHeader, Skeleton } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Tabs } from '@/components/ui/tabs';
 import { DiagnosisList, NoteBlock, ObservationGrid, sortNotes } from '@/components/clinical/clinical-blocks';

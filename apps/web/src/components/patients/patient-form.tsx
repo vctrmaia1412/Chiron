@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { CreatePatient, Guardian, Patient } from '@chiron/contracts';
@@ -8,9 +8,10 @@ import { api, errorMessage } from '@/lib/api';
 import { useBreeds, useSpecies } from '@/lib/catalog';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/field';
+import { Field, Input, Select, Textarea } from '@/components/ui/field';
 import { SectionTitle } from '@/components/ui/primitives';
 import { GuardianPicker } from '@/components/guardians/guardian-picker';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
 /**
  * Cadastro de paciente. O formulário se adapta à espécie escolhida: o campo
@@ -18,7 +19,7 @@ import { GuardianPicker } from '@/components/guardians/guardian-picker';
  * e os atributos específicos (temperatura do terrário, lote, anilha) entram
  * conforme o esquema declarado no catálogo.
  */
-export function PatientFormSheet({
+function PatientFormSheetContent({
   open,
   onOpenChange,
   patient,
@@ -35,82 +36,51 @@ export function PatientFormSheet({
   const editing = Boolean(patient);
   const { data: species = [] } = useSpecies();
 
-  const [name, setName] = useState('');
-  const [speciesId, setSpeciesId] = useState('');
-  const [breedId, setBreedId] = useState('');
-  const [breedFreeText, setBreedFreeText] = useState('');
-  const [scientificName, setScientificName] = useState('');
-  const [sex, setSex] = useState<'male' | 'female' | 'unknown'>('unknown');
-  const [reproductiveStatus, setReproductiveStatus] = useState<'intact' | 'neutered' | 'spayed' | 'unknown'>('unknown');
-  const [ageMode, setAgeMode] = useState<'birth' | 'estimated'>('birth');
-  const [birthDate, setBirthDate] = useState('');
-  const [ageYears, setAgeYears] = useState('');
-  const [ageMonths, setAgeMonths] = useState('');
-  const [colorMarkings, setColorMarkings] = useState('');
+  // O componente só existe enquanto a folha está aberta, então o estado nasce
+  // do paciente em edição (ou vazio, no cadastro) sem precisar de efeito.
+  const [name, setName] = useState(patient?.name ?? '');
+  const [speciesId, setSpeciesId] = useState(patient?.species.id ?? '');
+  const [breedId, setBreedId] = useState(patient?.breed?.id ?? '');
+  const [breedFreeText, setBreedFreeText] = useState(patient?.breedFreeText ?? '');
+  const [scientificName, setScientificName] = useState(String(patient?.attributes?.scientificName ?? ''));
+  const [sex, setSex] = useState<'male' | 'female' | 'unknown'>(patient?.sex ?? 'unknown');
+  const [reproductiveStatus, setReproductiveStatus] = useState<'intact' | 'neutered' | 'spayed' | 'unknown'>(
+    patient?.reproductiveStatus ?? 'unknown',
+  );
+  const [ageMode, setAgeMode] = useState<'birth' | 'estimated'>(
+    patient && !patient.birthDate ? 'estimated' : 'birth',
+  );
+  const [birthDate, setBirthDate] = useState(patient?.birthDate ?? '');
+  const [ageYears, setAgeYears] = useState(
+    patient?.estimatedAgeMonths ? String(Math.floor(patient.estimatedAgeMonths / 12)) : '',
+  );
+  const [ageMonths, setAgeMonths] = useState(
+    patient?.estimatedAgeMonths ? String(patient.estimatedAgeMonths % 12) : '',
+  );
+  const [colorMarkings, setColorMarkings] = useState(patient?.colorMarkings ?? '');
   const [weight, setWeight] = useState('');
-  const [weightUom, setWeightUom] = useState<'kg' | 'g'>('kg');
+  const [weightUom, setWeightUom] = useState<'kg' | 'g'>(
+    patient?.species.defaultWeightUom === 'g' ? 'g' : 'kg',
+  );
   const [microchip, setMicrochip] = useState('');
-  const [notes, setNotes] = useState('');
-  const [guardian, setGuardian] = useState<{ id: string; name: string } | null>(null);
+  const [notes, setNotes] = useState(patient?.notes ?? '');
+  const [guardian, setGuardian] = useState<{ id: string; name: string } | null>(
+    presetGuardian ? { id: presetGuardian.id, name: presetGuardian.name } : null,
+  );
   const [newGuardianName, setNewGuardianName] = useState('');
   const [newGuardianPhone, setNewGuardianPhone] = useState('');
   const [createGuardianInline, setCreateGuardianInline] = useState(false);
-  const [attributes, setAttributes] = useState<Record<string, string>>({});
+  const [attributes, setAttributes] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const [key, value] of Object.entries(patient?.attributes ?? {})) {
+      if (key !== 'scientificName') initial[key] = String(value ?? '');
+    }
+    return initial;
+  });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const selectedSpecies = useMemo(() => species.find((s) => s.id === speciesId) ?? null, [species, speciesId]);
   const { data: breeds = [] } = useBreeds(speciesId);
-
-  useEffect(() => {
-    if (!open) return;
-    if (patient) {
-      setName(patient.name);
-      setSpeciesId(patient.species.id);
-      setBreedId(patient.breed?.id ?? '');
-      setBreedFreeText(patient.breedFreeText ?? '');
-      setScientificName(String(patient.attributes?.scientificName ?? ''));
-      setSex(patient.sex);
-      setReproductiveStatus(patient.reproductiveStatus);
-      setAgeMode(patient.birthDate ? 'birth' : 'estimated');
-      setBirthDate(patient.birthDate ?? '');
-      setAgeYears(patient.estimatedAgeMonths ? String(Math.floor(patient.estimatedAgeMonths / 12)) : '');
-      setAgeMonths(patient.estimatedAgeMonths ? String(patient.estimatedAgeMonths % 12) : '');
-      setColorMarkings(patient.colorMarkings ?? '');
-      setNotes(patient.notes ?? '');
-      const attrs: Record<string, string> = {};
-      for (const [key, value] of Object.entries(patient.attributes ?? {})) {
-        if (key !== 'scientificName') attrs[key] = String(value ?? '');
-      }
-      setAttributes(attrs);
-    } else {
-      setName('');
-      setSpeciesId(species[0]?.id ?? '');
-      setBreedId('');
-      setBreedFreeText('');
-      setScientificName('');
-      setSex('unknown');
-      setReproductiveStatus('unknown');
-      setAgeMode('birth');
-      setBirthDate('');
-      setAgeYears('');
-      setAgeMonths('');
-      setColorMarkings('');
-      setWeight('');
-      setWeightUom('kg');
-      setMicrochip('');
-      setNotes('');
-      setAttributes({});
-      setGuardian(presetGuardian ? { id: presetGuardian.id, name: presetGuardian.name } : null);
-      setCreateGuardianInline(false);
-      setNewGuardianName('');
-      setNewGuardianPhone('');
-    }
-    setErrors({});
-  }, [open, patient, species, presetGuardian]);
-
-  useEffect(() => {
-    if (selectedSpecies) setWeightUom(selectedSpecies.defaultWeightUom === 'g' ? 'g' : 'kg');
-  }, [selectedSpecies]);
 
   const attributeSchema = useMemo(() => {
     const raw = (selectedSpecies as unknown as { attributeSchema?: Record<string, { label?: string; type?: string }> })
@@ -289,9 +259,14 @@ export function PatientFormSheet({
               <Select
                 value={speciesId}
                 onChange={(event) => {
-                  setSpeciesId(event.target.value);
+                  const nextId = event.target.value;
+                  setSpeciesId(nextId);
                   setBreedId('');
                   setAttributes({});
+                  // A unidade de peso acompanha a espécie: grama para ave e
+                  // roedor, quilo para o resto.
+                  const next = species.find((item) => item.id === nextId);
+                  if (next) setWeightUom(next.defaultWeightUom === 'g' ? 'g' : 'kg');
                 }}
               >
                 <option value="">Selecione</option>
@@ -485,5 +460,13 @@ export function PatientFormSheet({
         </section>
       </div>
     </Sheet>
+  );
+}
+
+export function PatientFormSheet(props: React.ComponentProps<typeof PatientFormSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <PatientFormSheetContent {...props} />
+    </MountWhenOpen>
   );
 }

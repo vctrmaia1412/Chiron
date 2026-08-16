@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle } from 'lucide-react';
@@ -12,8 +12,9 @@ import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
 import { PatientPicker } from '@/components/patients/patient-picker';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
 
-export function AppointmentFormSheet({
+function AppointmentFormSheetContent({
   open,
   onOpenChange,
   defaultDate,
@@ -30,10 +31,12 @@ export function AppointmentFormSheet({
   const { data: services = [] } = useServices();
   const { data: professionals = [] } = useProfessionals();
 
-  const [patient, setPatient] = useState<{ id: string; name: string; guardianId?: string | null } | null>(null);
-  const [serviceId, setServiceId] = useState('');
+  const [chosenPatient, setChosenPatient] = useState<
+    { id: string; name: string; guardianId?: string | null } | null
+  >(null);
+  const [chosenServiceId, setChosenServiceId] = useState('');
   const [professionalId, setProfessionalId] = useState('');
-  const [date, setDate] = useState('');
+  const [date, setDate] = useState(() => toIsoDate(defaultDate ?? new Date()));
   const [time, setTime] = useState('09:00');
   const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
@@ -44,30 +47,22 @@ export function AppointmentFormSheet({
   const { data: preset } = useQuery({
     queryKey: ['patient', defaultPatientId],
     queryFn: () => api.get<Patient>(`/patients/${defaultPatientId}`),
-    enabled: open && Boolean(defaultPatientId),
+    enabled: Boolean(defaultPatientId),
   });
 
-  useEffect(() => {
-    if (!open) return;
-    setDate(toIsoDate(defaultDate ?? new Date()));
-    setTime('09:00');
-    setReason('');
-    setNotes('');
-    setAllowOverlap(false);
-    setConflict(null);
-    setErrors({});
-    setServiceId(services.find((service) => service.key === 'consulta')?.id ?? services[0]?.id ?? '');
-    setProfessionalId('');
-    if (!defaultPatientId) setPatient(null);
-  }, [open, defaultDate, defaultPatientId, services]);
+  // Paciente vindo por parâmetro é derivado da consulta, não copiado para o
+  // estado: evita o descompasso entre o que chegou e o que está na tela.
+  const patient = useMemo(() => {
+    if (chosenPatient) return chosenPatient;
+    if (!preset) return null;
+    const primary = preset.guardians.find((g) => g.isPrimary) ?? preset.guardians[0];
+    return { id: preset.id, name: preset.name, guardianId: primary?.guardianId ?? null };
+  }, [chosenPatient, preset]);
 
-  useEffect(() => {
-    if (preset) {
-      const primary = preset.guardians.find((g) => g.isPrimary) ?? preset.guardians[0];
-      setPatient({ id: preset.id, name: preset.name, guardianId: primary?.guardianId ?? null });
-    }
-  }, [preset]);
-
+  // Consulta é o serviço mais frequente: entra pré-selecionado assim que o
+  // catálogo carrega, sem efeito copiando valor para o estado.
+  const serviceId =
+    chosenServiceId || services.find((service) => service.key === 'consulta')?.id || services[0]?.id || '';
   const selectedService = useMemo(() => services.find((s) => s.id === serviceId) ?? null, [services, serviceId]);
 
   const mutation = useMutation({
@@ -138,11 +133,10 @@ export function AppointmentFormSheet({
       }
     >
       <div className="space-y-4">
-        <PatientPicker value={patient} onChange={setPatient} error={errors.patient} />
+        <PatientPicker value={patient} onChange={setChosenPatient} error={errors.patient} />
 
         <Field label="Serviço" required error={errors.serviceId}>
-          <Select value={serviceId} onChange={(event) => setServiceId(event.target.value)}>
-            <option value="">Selecione</option>
+          <Select value={serviceId} onChange={(event) => setChosenServiceId(event.target.value)}>
             {services.map((service) => (
               <option key={service.id} value={service.id}>
                 {service.name} ({service.defaultDurationMin} min)
@@ -218,4 +212,12 @@ export function usePatientSearch(term: string, enabled: boolean) {
     enabled: enabled && term.length >= 2,
     staleTime: 15_000,
   });
+}
+
+export function AppointmentFormSheet(props: React.ComponentProps<typeof AppointmentFormSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <AppointmentFormSheetContent {...props} />
+    </MountWhenOpen>
+  );
 }
