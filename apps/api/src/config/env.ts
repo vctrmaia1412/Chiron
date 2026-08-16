@@ -28,6 +28,8 @@ const envSchema = z.object({
   DATABASE_IAM_URL: z.string().min(10).optional(),
   DATABASE_ADMIN_URL: z.string().min(10).optional(),
   DATABASE_MIGRATION_URL: z.string().min(10).optional(),
+  /** Senha dos papéis chiron_app, chiron_iam e chiron_admin, aplicada na migração. */
+  DATABASE_ROLE_PASSWORD: z.string().min(8).optional(),
   DATABASE_POOL_MAX: z.coerce.number().int().default(10),
 
   REDIS_URL: z.string().optional(),

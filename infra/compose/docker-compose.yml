@@ -69,8 +69,9 @@ services:
     environment:
       NODE_ENV: production
       APP_ENV: ${APP_ENV:-homolog}
-      DATABASE_URL: postgres://chiron_app:${POSTGRES_PASSWORD}@postgres:5432/chiron
+      DATABASE_URL: postgres://chiron_app:${DATABASE_ROLE_PASSWORD}@postgres:5432/chiron
       DATABASE_MIGRATION_URL: postgres://chiron_owner:${POSTGRES_PASSWORD}@postgres:5432/chiron
+      DATABASE_ROLE_PASSWORD: ${DATABASE_ROLE_PASSWORD:?defina DATABASE_ROLE_PASSWORD no .env}
       SESSION_SECRET: ${SESSION_SECRET:?defina SESSION_SECRET no .env}
       COLUMN_ENCRYPTION_KEY: ${COLUMN_ENCRYPTION_KEY:?defina COLUMN_ENCRYPTION_KEY no .env}
       COLUMN_HASH_KEY: ${COLUMN_HASH_KEY:?defina COLUMN_HASH_KEY no .env}
@@ -91,9 +92,9 @@ services:
       APP_ENV: ${APP_ENV:-homolog}
       PORT: 3333
       HOST: 0.0.0.0
-      DATABASE_URL: postgres://chiron_app:${POSTGRES_PASSWORD}@postgres:5432/chiron
-      DATABASE_IAM_URL: postgres://chiron_iam:${POSTGRES_PASSWORD}@postgres:5432/chiron
-      DATABASE_ADMIN_URL: postgres://chiron_admin:${POSTGRES_PASSWORD}@postgres:5432/chiron
+      DATABASE_URL: postgres://chiron_app:${DATABASE_ROLE_PASSWORD}@postgres:5432/chiron
+      DATABASE_IAM_URL: postgres://chiron_iam:${DATABASE_ROLE_PASSWORD}@postgres:5432/chiron
+      DATABASE_ADMIN_URL: postgres://chiron_admin:${DATABASE_ROLE_PASSWORD}@postgres:5432/chiron
       DATABASE_MIGRATION_URL: postgres://chiron_owner:${POSTGRES_PASSWORD}@postgres:5432/chiron
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       S3_ENDPOINT: http://minio:9000
@@ -125,8 +126,8 @@ services:
     environment:
       NODE_ENV: production
       APP_ENV: ${APP_ENV:-homolog}
-      DATABASE_URL: postgres://chiron_app:${POSTGRES_PASSWORD}@postgres:5432/chiron
-      DATABASE_ADMIN_URL: postgres://chiron_admin:${POSTGRES_PASSWORD}@postgres:5432/chiron
+      DATABASE_URL: postgres://chiron_app:${DATABASE_ROLE_PASSWORD}@postgres:5432/chiron
+      DATABASE_ADMIN_URL: postgres://chiron_admin:${DATABASE_ROLE_PASSWORD}@postgres:5432/chiron
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:

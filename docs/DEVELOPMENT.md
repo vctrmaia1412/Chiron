@@ -151,6 +151,7 @@ fora do versionamento.
 | `DATABASE_IAM_URL` | conexão do módulo de identidade |
 | `DATABASE_ADMIN_URL` | conexão do worker (cross-tenant) |
 | `DATABASE_MIGRATION_URL` | conexão do dono, só para migração |
+| `DATABASE_ROLE_PASSWORD` | senha dos papéis da aplicação, aplicada na migração |
 | `SESSION_SECRET` | HMAC do identificador de sessão |
 | `COLUMN_ENCRYPTION_KEY` | cifra de CPF e CNPJ (AES-256-GCM) |
 | `COLUMN_HASH_KEY` | índice cego para busca por documento |
@@ -161,6 +162,12 @@ fora do versionamento.
 
 Em produção, gere os segredos com `openssl rand -base64 48` e guarde fora do
 repositório.
+
+`DATABASE_ROLE_PASSWORD` é obrigatória fora de desenvolvimento: os papéis
+`chiron_app`, `chiron_iam` e `chiron_admin` recebem essa senha durante a
+migração, e ela precisa bater com a usada nas URLs de conexão. O migrador
+aborta se a variável faltar em homologação ou produção, em vez de deixar os
+papéis com a senha de exemplo.
 
 ## Como o frontend conversa com a API
 

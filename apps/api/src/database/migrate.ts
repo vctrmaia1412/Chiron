@@ -38,6 +38,20 @@ export async function runMigrations(connectionString?: string): Promise<{ applie
   const applied: string[] = [];
 
   try {
+    // Senha dos papéis da aplicação: vem de variável de ambiente e é aplicada
+    // pela migração 0005. Nunca fica escrita no SQL versionado.
+    const cfg = env();
+    const rolePassword = cfg.DATABASE_ROLE_PASSWORD;
+    if (!rolePassword && (cfg.APP_ENV === 'prod' || cfg.APP_ENV === 'homolog')) {
+      throw new Error(
+        'DATABASE_ROLE_PASSWORD é obrigatória fora de desenvolvimento: ' +
+          'os papéis de banco não podem ficar com a senha de exemplo.',
+      );
+    }
+    await client.query(`SELECT set_config('chiron.role_password', $1, false)`, [
+      rolePassword ?? 'chiron_dev_password',
+    ]);
+
     await client.query(`CREATE SCHEMA IF NOT EXISTS platform`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS platform.schema_migrations (

@@ -63,7 +63,7 @@ apps/api/test       Integração contra PostgreSQL real, 1.220 linhas
 
 ## Banco de dados
 
-80 tabelas em 11 schemas. Quatro migrações versionadas com verificação de
+80 tabelas em 11 schemas. Cinco migrações versionadas com verificação de
 hash: migração já aplicada que for editada aborta o processo em vez de gerar
 divergência silenciosa entre ambientes.
 
@@ -116,7 +116,9 @@ com o código porque a fonte é a mesma.
 - Upload confere magic bytes contra o tipo declarado antes de liberar o
   arquivo; download só por URL assinada de curta duração, com registro no log
   de acesso.
-- Segredos vêm de variável de ambiente. Nenhuma credencial no versionamento.
+- Segredos vêm de variável de ambiente, inclusive a senha dos papéis de
+  banco: a migração a recebe por configuração e aborta se ela faltar fora de
+  desenvolvimento. Nenhuma credencial de produção no versionamento.
 - Nenhum dado clínico é guardado no navegador.
 
 ## LGPD

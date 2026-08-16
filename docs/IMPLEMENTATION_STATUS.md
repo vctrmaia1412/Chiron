@@ -19,13 +19,14 @@ Atualizado em 16 de agosto de 2026.
 
 ### Banco de dados
 
-- 4 migrações versionadas com verificação de hash: migração já aplicada que
+- 5 migrações versionadas com verificação de hash: migração já aplicada que
   for editada aborta o processo.
 - 80 tabelas em 11 schemas, com timestamps, restrições, índices e chaves
   estrangeiras compostas por `(tenant_id, id)`.
 - Row Level Security em cinco famílias, com registro declarativo e guarda
   automática que recusa tabela sem política coerente.
-- Quatro papéis de banco com responsabilidades distintas.
+- Quatro papéis de banco com responsabilidades distintas, com senha vinda de
+  variável de ambiente e não do SQL versionado.
 - Triggers de imutabilidade em nota clínica, receita, auditoria, log de acesso
   e movimentação de estoque.
 - Restrição de exclusão que impede sobreposição de horário por profissional,
