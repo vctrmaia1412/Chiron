@@ -21,7 +21,7 @@ Atualizado em 16 de agosto de 2026.
 
 - 4 migrações versionadas com verificação de hash: migração já aplicada que
   for editada aborta o processo.
-- 63 tabelas em 11 schemas, com timestamps, restrições, índices e chaves
+- 80 tabelas em 11 schemas, com timestamps, restrições, índices e chaves
   estrangeiras compostas por `(tenant_id, id)`.
 - Row Level Security em cinco famílias, com registro declarativo e guarda
   automática que recusa tabela sem política coerente.
