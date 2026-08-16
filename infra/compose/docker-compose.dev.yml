@@ -1,0 +1,76 @@
+name: chiron-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chiron-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chiron_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chiron_dev_password}
+      POSTGRES_DB: chiron
+      # pt-BR friendly defaults; the app always stores timestamptz in UTC
+      TZ: UTC
+      PGTZ: UTC
+    command:
+      - postgres
+      - -c
+      - log_statement=none
+      - -c
+      - max_connections=200
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chiron_owner -d chiron"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: chiron-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-chiron_dev_password}"]
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-chiron_dev_password}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: chiron-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-chiron_minio}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-chiron_dev_password}
+    ports:
+      - "${S3_PORT:-9000}:9000"
+      - "${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: chiron-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAIL_SMTP_PORT:-1025}:1025"
+      - "${MAIL_UI_PORT:-8025}:8025"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
