@@ -91,6 +91,57 @@ const SERVICES = [
   { key: 'teleorientacao', name: 'Teleorientação', category: 'telehealth', minutes: 25, price: 120 },
 ];
 
+const GENERIC_REASONS = [
+  'Avaliação clínica de rotina',
+  'Acompanhamento de quadro anterior',
+  'Tutor relata mudança de comportamento',
+];
+
+const REASONS: Record<string, string[]> = {
+  consulta: [
+    'Apatia e redução do apetite',
+    'Vômito intermitente há dois dias',
+    'Prurido e lambedura excessiva das patas',
+    'Claudicação leve após passeio',
+    'Diarreia sem sangue há três dias',
+    'Tosse seca noturna',
+    'Emagrecimento progressivo',
+    'Aumento da ingestão de água',
+  ],
+  retorno: [
+    'Retorno para reavaliação clínica',
+    'Reavaliação após término do tratamento',
+    'Controle de peso e escore corporal',
+    'Revisão de ferida cirúrgica',
+  ],
+  vacinacao: ['Reforço anual de vacina', 'Segunda dose do protocolo', 'Vacinação antirrábica'],
+  'consulta-exotico': [
+    'Penas opacas e menor vocalização',
+    'Redução do consumo de feno',
+    'Dificuldade de ecdise',
+    'Perda de peso em animal exótico',
+    'Apatia e postura encolhida',
+  ],
+  'atendimento-campo': [
+    'Queda na produção de leite',
+    'Claudicação de membro posterior',
+    'Avaliação reprodutiva do rebanho',
+    'Cólica leve com boa resposta ao manejo',
+    'Escore corporal em queda',
+  ],
+  emergencia: [
+    'Suspeita de intoxicação',
+    'Dispneia aguda',
+    'Trauma leve por atropelamento',
+    'Crise convulsiva isolada',
+  ],
+  'coleta-exames': ['Coleta para perfil bioquímico', 'Hemograma de controle', 'Coleta para urinálise'],
+  'exame-imagem': ['Radiografia de controle', 'Ultrassonografia abdominal', 'Radiografia de tórax'],
+  procedimento: ['Limpeza e curativo de ferida', 'Drenagem de abscesso', 'Aplicação de medicação injetável'],
+  teleorientacao: ['Orientação sobre manejo alimentar', 'Dúvida sobre medicação em uso', 'Triagem à distância'],
+  'banho-tosa': ['Banho e tosa higiênica', 'Tosa de verão'],
+};
+
 interface SeedGuardian {
   key: string;
   name: string;
@@ -305,6 +356,113 @@ const PATIENTS: SeedPatient[] = [
   },
 ];
 
+// ------------------------------------------------- base gerada para volume
+// Os tutores e pacientes acima são os casos de demonstração, com histórico
+// escrito à mão. A base abaixo é gerada com semente fixa e existe para que três
+// meses de agenda não recaiam sempre nos mesmos doze animais.
+
+const FIRST_NAMES = [
+  'Ana', 'Carlos', 'Beatriz', 'Daniel', 'Eduarda', 'Felipe', 'Gabriela', 'Henrique',
+  'Isabela', 'João', 'Larissa', 'Marcelo', 'Natália', 'Otávio', 'Priscila', 'Rafael',
+  'Sabrina', 'Thiago', 'Vanessa', 'Wagner', 'Yasmin', 'Bruno', 'Carolina', 'Diego',
+  'Elaine', 'Fábio', 'Giovana', 'Hugo', 'Joana', 'Leandro',
+];
+
+const LAST_NAMES = [
+  'Silva', 'Souza', 'Oliveira', 'Santos', 'Pereira', 'Lima', 'Carvalho', 'Almeida',
+  'Ferreira', 'Rodrigues', 'Barbosa', 'Martins', 'Rocha', 'Dias', 'Moreira',
+];
+
+const CITIES = ['São Paulo', 'Guarulhos', 'Osasco', 'Santo André', 'Campinas', 'Itu', 'Barueri'];
+
+const PET_NAMES = [
+  'Luna', 'Bob', 'Fred', 'Maya', 'Zeus', 'Lola', 'Max', 'Cacau', 'Fiona', 'Théo',
+  'Nick', 'Bela', 'Duque', 'Manu', 'Pretinha', 'Rex', 'Chico', 'Nuvem', 'Bento', 'Aurora',
+  'Pandora', 'Toby', 'Frida', 'Cookie', 'Jade', 'Loki', 'Maggie', 'Nemo', 'Olívia', 'Pipa',
+  'Quindim', 'Romeu', 'Safira', 'Tigrão', 'Uva', 'Vito', 'Xuxa', 'Zara', 'Amendoim', 'Brisa',
+  'Canela', 'Dandara', 'Elvis', 'Fumaça', 'Gaia', 'Horus', 'Iris', 'Juno', 'Kiara', 'Lupi',
+  'Malu', 'Nina Flor', 'Otto', 'Perola', 'Quiara', 'Rubi', 'Simba II', 'Trufa', 'Ursa', 'Valente',
+];
+
+const COLORS = ['Preto', 'Branco', 'Caramelo', 'Tigrado', 'Cinza', 'Malhado', 'Rajado', 'Dourado', 'Tricolor'];
+
+const SPECIES_PROFILE: Record<string, { weight: [number, number]; maxAgeYears: number }> = {
+  dog: { weight: [3, 45], maxAgeYears: 13 },
+  cat: { weight: [2.5, 7.5], maxAgeYears: 15 },
+  bird: { weight: [0.02, 1.2], maxAgeYears: 12 },
+  reptile: { weight: [0.3, 8], maxAgeYears: 15 },
+  rabbit: { weight: [1.2, 3.2], maxAgeYears: 9 },
+  rodent: { weight: [0.3, 1.5], maxAgeYears: 5 },
+  horse: { weight: [380, 600], maxAgeYears: 20 },
+  cattle: { weight: [400, 700], maxAgeYears: 10 },
+};
+
+/** CPF com dígitos verificadores corretos, derivado de uma semente. */
+function cpfFrom(rng: () => number): string {
+  const digits: number[] = [];
+  for (let index = 0; index < 9; index += 1) digits.push(Math.floor(rng() * 10));
+  for (let round = 0; round < 2; round += 1) {
+    const length = digits.length;
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) sum += (digits[index] ?? 0) * (length + 1 - index);
+    const rest = (sum * 10) % 11;
+    digits.push(rest === 10 ? 0 : rest);
+  }
+  return digits.join('');
+}
+
+const EXTRA_SPECIES: string[] = [
+  ...Array<string>(26).fill('dog'),
+  ...Array<string>(14).fill('cat'),
+  ...Array<string>(4).fill('bird'),
+  ...Array<string>(3).fill('rabbit'),
+  ...Array<string>(3).fill('rodent'),
+  ...Array<string>(2).fill('reptile'),
+  ...Array<string>(4).fill('horse'),
+  ...Array<string>(4).fill('cattle'),
+];
+
+const baseRng = makeRng(0x5eed1412);
+const usedDocuments = new Set(GUARDIANS.map((g) => g.cpf));
+
+for (let index = 0; index < 30; index += 1) {
+  const first = pick(baseRng, FIRST_NAMES);
+  const last = pick(baseRng, LAST_NAMES);
+  let cpf = cpfFrom(baseRng);
+  while (usedDocuments.has(cpf)) cpf = cpfFrom(baseRng);
+  usedDocuments.add(cpf);
+
+  const slug = `${first}.${last}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  GUARDIANS.push({
+    key: `gx${index + 1}`,
+    name: `${first} ${last}`,
+    cpf,
+    email: `${slug}.${index + 1}@exemplo.dev`,
+    phone: `(11) 9${String(1000 + Math.floor(baseRng() * 8999))}-${String(1000 + Math.floor(baseRng() * 8999))}`,
+    city: pick(baseRng, CITIES),
+  });
+}
+
+for (const [index, speciesCode] of EXTRA_SPECIES.entries()) {
+  const profile = SPECIES_PROFILE[speciesCode] ?? SPECIES_PROFILE.dog;
+  const weightRange = profile?.weight ?? [1, 10];
+  const maxAgeYears = profile?.maxAgeYears ?? 10;
+  const ageDays = Math.floor(180 + baseRng() * maxAgeYears * 365);
+  const female = baseRng() < 0.5;
+
+  PATIENTS.push({
+    key: `px${index + 1}`,
+    name: PET_NAMES[index] ?? `Paciente ${index + 1}`,
+    speciesCode,
+    sex: female ? 'female' : 'male',
+    reproductive: baseRng() < 0.6 ? (female ? 'spayed' : 'neutered') : 'intact',
+    birthDate: dateOnly(new Date(Date.now() - ageDays * 86_400_000)),
+    weightKg: Number((weightRange[0] + baseRng() * (weightRange[1] - weightRange[0])).toFixed(2)),
+    color: pick(baseRng, COLORS),
+    guardianKey: `gx${1 + (index % 30)}`,
+  });
+}
+
 function iso(date: Date): string {
   return date.toISOString();
 }
@@ -322,6 +480,30 @@ function addMinutes(date: Date, minutes: number): Date {
 
 function dateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Gerador pseudoaleatório com semente fixa. O volume de demonstração precisa
+ * ser variado mas idêntico a cada execução, para que um bug reproduza igual.
+ */
+function makeRng(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pick<T>(rng: () => number, items: readonly T[]): T {
+  return items[Math.floor(rng() * items.length)] as T;
+}
+
+function between(rng: () => number, min: number, max: number, decimals = 0): number {
+  const factor = 10 ** decimals;
+  return Math.round((min + rng() * (max - min)) * factor) / factor;
 }
 
 export interface SeedOptions {
@@ -351,13 +533,15 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
   const passwordHash = await argonHash(DEMO_PASSWORD, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
 
   try {
-    await client.query('BEGIN');
-
+    // A limpeza vem antes da transação porque roda em outra conexão, com o
+    // papel dono das tabelas (ver purgeDemoTenants).
     const existing = await client.query<{ id: string }>(`SELECT id FROM platform.tenants WHERE slug IN ('demo','beta')`);
     if (existing.rowCount) {
       log('Removendo dados de demonstração anteriores...');
-      await client.query(`DELETE FROM platform.tenants WHERE slug IN ('demo','beta')`);
+      await purgeDemoTenants(cfg.DATABASE_MIGRATION_URL ?? url);
     }
+
+    await client.query('BEGIN');
 
     const planRow = await client.query<{ id: string }>(`SELECT id FROM platform.plans WHERE key = 'hospital'`);
     const planId = planRow.rows[0]?.id;
@@ -695,6 +879,12 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
       }
     }
 
+    // ----------------------------------------------------------- exames
+    const examCatalog = await client.query<{ id: string; code: string }>(
+      `SELECT id, code FROM lab.exam_catalog WHERE tenant_id IS NULL`,
+    );
+    const examByCode = new Map(examCatalog.rows.map((r) => [r.code, r.id]));
+
     // ------------------------------------------------ agenda e atendimentos
     const today = new Date();
     const vet1 = professionalIds.get('vet1') ?? null;
@@ -713,17 +903,21 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
       status: 'scheduled' | 'confirmed' | 'checked_in' | 'in_service' | 'completed' | 'no_show' | 'cancelled';
       encounter?: 'finished' | 'in_progress' | 'arrived' | 'triaged';
       reason?: string;
+      /** Marca um item curado que outra parte do seed referencia pelo nome. */
+      tag?: string;
+      /** Item gerado em volume, com conteúdo clínico genérico. */
+      bulk?: boolean;
     }
 
     const AGENDA: AgendaSeed[] = [
       { patientKey: 'p1', serviceKey: 'consulta', professionalId: vet1, dayOffset: -21, hour: 9, minute: 0, status: 'completed', encounter: 'finished', reason: 'Claudicação no membro posterior direito' },
-      { patientKey: 'p4', serviceKey: 'consulta', professionalId: vet1, dayOffset: -14, hour: 10, minute: 30, status: 'completed', encounter: 'finished', reason: 'Reavaliação renal' },
+      { patientKey: 'p4', serviceKey: 'consulta', professionalId: vet1, dayOffset: -14, hour: 10, minute: 30, status: 'completed', encounter: 'finished', reason: 'Reavaliação renal', tag: 'nina-renal' },
       { patientKey: 'p5', serviceKey: 'consulta-exotico', professionalId: vet2, dayOffset: -10, hour: 14, minute: 0, status: 'completed', encounter: 'finished', reason: 'Penas arrepiadas e apatia' },
       { patientKey: 'p8', serviceKey: 'atendimento-campo', professionalId: vet3, dayOffset: -7, hour: 8, minute: 0, status: 'completed', encounter: 'finished', reason: 'Queda na produção de leite' },
       { patientKey: 'p2', serviceKey: 'vacinacao', professionalId: vet1, dayOffset: -5, hour: 11, minute: 0, status: 'completed', encounter: 'finished', reason: 'Vacina quádrupla felina' },
       { patientKey: 'p7', serviceKey: 'atendimento-campo', professionalId: vet3, dayOffset: -3, hour: 9, minute: 0, status: 'completed', encounter: 'finished', reason: 'Cólica leve' },
       { patientKey: 'p1', serviceKey: 'retorno', professionalId: vet1, dayOffset: 0, hour: 8, minute: 30, status: 'completed', encounter: 'finished', reason: 'Retorno da claudicação' },
-      { patientKey: 'p3', serviceKey: 'consulta', professionalId: vet1, dayOffset: 0, hour: 9, minute: 30, status: 'in_service', encounter: 'in_progress', reason: 'Otite recorrente' },
+      { patientKey: 'p3', serviceKey: 'consulta', professionalId: vet1, dayOffset: 0, hour: 9, minute: 30, status: 'in_service', encounter: 'in_progress', reason: 'Otite recorrente', tag: 'bidu-otite' },
       { patientKey: 'p9', serviceKey: 'consulta-exotico', professionalId: vet2, dayOffset: 0, hour: 10, minute: 30, status: 'checked_in', encounter: 'triaged', reason: 'Diminuição do apetite' },
       { patientKey: 'p12', serviceKey: 'consulta', professionalId: vet1, dayOffset: 0, hour: 11, minute: 30, status: 'checked_in', encounter: 'arrived', reason: 'Tosse seca há 3 dias' },
       { patientKey: 'p11', serviceKey: 'vacinacao', professionalId: vet1, dayOffset: 0, hour: 14, minute: 0, status: 'confirmed' },
@@ -738,9 +932,144 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
       { patientKey: 'p11', serviceKey: 'consulta', professionalId: vet1, dayOffset: -1, hour: 16, minute: 0, status: 'cancelled' },
     ];
 
-    const encounterByAgenda = new Map<number, string>();
+    // --------------------------------- volume: 3 meses atrás e 1 mês à frente
+    // A agenda acima é curada e cobre os casos de demonstração do dia. O bloco
+    // abaixo preenche o histórico e o futuro, para que agenda, prontuário,
+    // faturamento e relatórios tenham volume suficiente para teste.
+    const HISTORY_DAYS = 90;
+    const FUTURE_DAYS = 30;
 
-    for (const [index, item] of AGENDA.entries()) {
+    const keysOf = (codes: string[]) => PATIENTS.filter((p) => codes.includes(p.speciesCode)).map((p) => p.key);
+
+    const ROSTER: Array<{
+      professionalId: string | null;
+      patientKeys: string[];
+      serviceKeys: string[];
+      slotsPerDay: [number, number];
+    }> = [
+      {
+        professionalId: vet1,
+        patientKeys: keysOf(['dog', 'cat']),
+        serviceKeys: [
+          'consulta', 'consulta', 'consulta', 'retorno', 'retorno', 'vacinacao',
+          'coleta-exames', 'exame-imagem', 'procedimento', 'emergencia', 'teleorientacao',
+        ],
+        slotsPerDay: [4, 7],
+      },
+      {
+        professionalId: vet2,
+        patientKeys: keysOf(['bird', 'reptile', 'rabbit', 'rodent']),
+        serviceKeys: ['consulta-exotico', 'consulta-exotico', 'retorno', 'coleta-exames'],
+        slotsPerDay: [1, 3],
+      },
+      {
+        professionalId: vet3,
+        patientKeys: keysOf(['horse', 'cattle']),
+        serviceKeys: ['atendimento-campo', 'atendimento-campo', 'retorno', 'coleta-exames'],
+        slotsPerDay: [1, 2],
+      },
+    ];
+
+    // O mesmo profissional não pode ter horários sobrepostos (constraint
+    // appointments_no_overlap), então cada faixa é reservada antes de virar item.
+    const busySlots = new Map<string, Array<[number, number]>>();
+    const reserveSlot = (professionalId: string | null, start: Date, minutes: number): boolean => {
+      if (!professionalId) return true;
+      const from = start.getTime();
+      const to = from + minutes * 60_000;
+      const ranges = busySlots.get(professionalId) ?? [];
+      if (ranges.some(([a, b]) => from < b && to > a)) return false;
+      ranges.push([from, to]);
+      busySlots.set(professionalId, ranges);
+      return true;
+    };
+
+    for (const curated of AGENDA) {
+      const curatedService = SERVICES.find((s) => s.key === curated.serviceKey);
+      if (!curatedService) continue;
+      reserveSlot(
+        curated.professionalId,
+        at(today, curated.dayOffset, curated.hour, curated.minute),
+        curatedService.minutes,
+      );
+    }
+
+    const agendaRng = makeRng(20260816);
+
+    for (let dayOffset = -HISTORY_DAYS; dayOffset <= FUTURE_DAYS; dayOffset += 1) {
+      if (dayOffset === 0) continue; // o dia de hoje já está curado acima
+      const weekday = at(today, dayOffset, 12).getDay();
+      if (weekday === 0) continue; // domingo fechado
+      const saturday = weekday === 6;
+      const closingMinutes = saturday ? 13 * 60 : 18 * 60;
+
+      for (const entry of ROSTER) {
+        const [minSlots, maxSlots] = entry.slotsPerDay;
+        // A agenda futura é mais vazia que a passada, e fica mais vazia quanto
+        // mais distante, como numa clínica real. A primeira hora do dia futuro
+        // fica livre para encaixe, e é o que garante espaço para agendar.
+        const futureFactor = dayOffset > 0 ? 1 - (dayOffset / FUTURE_DAYS) * 0.5 : 1;
+        const drawn = minSlots + Math.floor(agendaRng() * (maxSlots - minSlots + 1));
+        const target = saturday
+          ? Math.max(1, Math.round(minSlots / 2))
+          : Math.max(1, Math.round(drawn * futureFactor));
+        let cursor = (dayOffset > 0 ? 10 * 60 : 8 * 60) + Math.floor(agendaRng() * 3) * 30;
+
+        for (let slot = 0; slot < target; slot += 1) {
+          const serviceKey = pick(agendaRng, entry.serviceKeys);
+          const slotService = SERVICES.find((s) => s.key === serviceKey);
+          if (!slotService) continue;
+          if (cursor + slotService.minutes > closingMinutes) break;
+
+          const hour = Math.floor(cursor / 60);
+          const minute = cursor % 60;
+          const slotStart = at(today, dayOffset, hour, minute);
+          cursor += slotService.minutes + 10;
+          if (!saturday && cursor > 12 * 60 && cursor < 13 * 60) cursor = 13 * 60; // intervalo de almoço
+          if (!reserveSlot(entry.professionalId, slotStart, slotService.minutes)) continue;
+
+          const roll = agendaRng();
+          let status: AgendaSeed['status'] = 'scheduled';
+          let encounter: AgendaSeed['encounter'] = undefined;
+          if (dayOffset < 0) {
+            if (roll < 0.07) {
+              status = 'no_show';
+            } else if (roll < 0.13) {
+              status = 'cancelled';
+            } else {
+              status = 'completed';
+              encounter = 'finished';
+            }
+          } else if (roll < 0.05) {
+            status = 'cancelled';
+          } else if (roll < 0.45) {
+            status = 'confirmed';
+          }
+
+          if (!entry.patientKeys.length) continue;
+
+          AGENDA.push({
+            patientKey: pick(agendaRng, entry.patientKeys),
+            serviceKey,
+            professionalId: entry.professionalId,
+            dayOffset,
+            hour,
+            minute,
+            status,
+            encounter,
+            reason: pick(agendaRng, REASONS[serviceKey] ?? GENERIC_REASONS),
+            bulk: true,
+          });
+        }
+      }
+    }
+
+    // A numeração de agendamento e de atendimento segue a ordem cronológica.
+    AGENDA.sort((a, b) => a.dayOffset - b.dayOffset || a.hour - b.hour || a.minute - b.minute);
+
+    const encounterByTag = new Map<string, string>();
+
+    for (const item of AGENDA) {
       const patientId = patientIds.get(item.patientKey);
       const serviceId = serviceIds.get(item.serviceKey);
       const service = SERVICES.find((s) => s.key === item.serviceKey);
@@ -820,7 +1149,7 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
           userVet1,
         ],
       );
-      encounterByAgenda.set(index, encounterId);
+      if (item.tag) encounterByTag.set(item.tag, encounterId);
 
       await client.query(
         `UPDATE scheduling.appointments SET encounter_id = $3 WHERE id = $1 AND tenant_id = $2`,
@@ -829,7 +1158,12 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
 
       const signedAt = finished ? iso(addMinutes(startAt, service.minutes)) : null;
       const noteStatus = finished ? 'final' : 'draft';
-      const content = clinicalContent(item.patientKey, item.serviceKey);
+      const itemSeed = seedFor(`${item.patientKey}|${item.dayOffset}|${item.hour}|${item.minute}`);
+      // Os itens curados têm texto clínico próprio. Os gerados em volume usam
+      // conteúdo genérico coerente com a espécie e o serviço.
+      const content = item.bulk
+        ? genericContent(patient, item.serviceKey, makeRng(itemSeed))
+        : clinicalContent(item.patientKey, item.serviceKey);
 
       let sequence = 0;
       for (const [kind, body] of Object.entries(content.notes)) {
@@ -978,11 +1312,21 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
           );
         }
 
+        // O ciclo de cobrança acompanha a idade do atendimento: o que é antigo
+        // já foi faturado ou acertado fora do sistema, o recente segue pendente.
+        const billingRoll = makeRng(itemSeed ^ 0x9e3779b9)();
+        let chargeStatus: 'pending' | 'invoiced' | 'settled_externally' | 'cancelled' = 'pending';
+        if (item.dayOffset <= -30) {
+          chargeStatus = billingRoll < 0.7 ? 'invoiced' : billingRoll < 0.95 ? 'settled_externally' : 'cancelled';
+        } else if (item.dayOffset <= -7) {
+          chargeStatus = billingRoll < 0.55 ? 'invoiced' : billingRoll < 0.9 ? 'pending' : 'settled_externally';
+        }
+
         await client.query(
           `INSERT INTO billing.charge_items
              (tenant_id, facility_id, patient_id, payer_guardian_id, encounter_id, source_table, source_id,
               service_id, description, quantity, unit_price, total, status, occurred_at, created_by)
-           VALUES ($1,$2,$3,$4,$5,'clinical.encounters',$5,$6,$7,1,$8,$8,'pending',$9,$10)`,
+           VALUES ($1,$2,$3,$4,$5,'clinical.encounters',$5,$6,$7,1,$8,$8,$11,$9,$10)`,
           [
             tenantId,
             facilityMain,
@@ -994,8 +1338,117 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
             service.price,
             iso(addMinutes(startAt, service.minutes)),
             userVet1,
+            chargeStatus,
           ],
         );
+
+        // Vacinação gerada em volume também registra a carteira de vacinas.
+        if (item.bulk && item.serviceKey === 'vacinacao' && patient) {
+          const vaccineRng = makeRng(itemSeed ^ 0x5bf03635);
+          const catalog = VACCINES_BY_SPECIES[patient.speciesCode] ?? VACCINES_BY_SPECIES.default ?? [];
+          const vaccine = catalog.length ? pick(vaccineRng, catalog) : null;
+          if (vaccine) {
+            const nextDue = at(today, item.dayOffset + 365, 9);
+            await client.query(
+              `INSERT INTO immunization.immunizations
+                 (tenant_id, patient_id, vaccine_name, manufacturer, lot_number, expires_at, administered_at,
+                  professional_id, administered_by_user_id, route, site, dose_number, next_due_at, status)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sc','Região escapular',$10,$11,'completed')`,
+              [
+                tenantId,
+                patientId,
+                vaccine.name,
+                vaccine.manufacturer,
+                `LT${1000 + Math.floor(vaccineRng() * 8999)}`,
+                dateOnly(at(today, item.dayOffset + 540, 9)),
+                iso(addMinutes(startAt, 5)),
+                item.professionalId,
+                userVet1,
+                1 + Math.floor(vaccineRng() * 3),
+                dateOnly(nextDue),
+              ],
+            );
+          }
+        }
+
+        // Coleta de exames gerada em volume produz pedido, item e resultado.
+        if (item.bulk && item.serviceKey === 'coleta-exames') {
+          const examRng = makeRng(itemSeed ^ 0x27d4eb2f);
+          const panel = pick(examRng, EXAM_PANELS);
+          const catalogId = examByCode.get(panel.code);
+          if (catalogId) {
+            const orderId = uuidv7();
+            const orderNumber = await nextNumber(client, tenantId, 'exam_order');
+            const resulted = examRng() < 0.85;
+            await client.query(
+              `INSERT INTO lab.exam_orders
+                 (id, tenant_id, facility_id, number, patient_id, encounter_id, ordered_by_professional_id,
+                  ordered_by_user_id, ordered_at, priority, clinical_info, status)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'routine',$10,$11)`,
+              [
+                orderId,
+                tenantId,
+                facilityMain,
+                orderNumber,
+                patientId,
+                encounterId,
+                item.professionalId,
+                userVet1,
+                iso(addMinutes(startAt, 5)),
+                item.reason ?? null,
+                resulted ? 'resulted' : 'ordered',
+              ],
+            );
+
+            const orderItemId = uuidv7();
+            await client.query(
+              `INSERT INTO lab.exam_order_items
+                 (id, tenant_id, exam_order_id, exam_catalog_id, laboratory_id, status, collected_at, collected_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+              [
+                orderItemId,
+                tenantId,
+                orderId,
+                catalogId,
+                labInternalId,
+                resulted ? 'resulted' : 'collected',
+                iso(addMinutes(startAt, 10)),
+                userVet1,
+              ],
+            );
+
+            if (resulted) {
+              const resultId = uuidv7();
+              await client.query(
+                `INSERT INTO lab.exam_results
+                   (id, tenant_id, exam_order_item_id, patient_id, released_at, released_by, report_text,
+                    interpretation, status, source)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'final','manual')`,
+                [
+                  resultId,
+                  tenantId,
+                  orderItemId,
+                  patientId,
+                  iso(addMinutes(startAt, 240)),
+                  userVet1,
+                  'Amostra adequada, sem intercorrências na coleta.',
+                  pick(examRng, panel.interpretations),
+                ],
+              );
+
+              for (const [sort, analyte] of panel.analytes.entries()) {
+                const value = between(examRng, analyte.min * 0.85, analyte.max * 1.15, 2);
+                const flag = value < analyte.min ? 'low' : value > analyte.max ? 'high' : 'normal';
+                await client.query(
+                  `INSERT INTO lab.exam_result_values
+                     (tenant_id, exam_result_id, analyte_code, analyte_name, value_numeric, uom, ref_min, ref_max, abnormal_flag, sort)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+                  [tenantId, resultId, analyte.code, analyte.name, value, analyte.uom, analyte.min, analyte.max, flag, sort],
+                );
+              }
+            }
+          }
+        }
       }
     }
 
@@ -1056,15 +1509,66 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
       );
     }
 
-    // ----------------------------------------------------------- exames
-    const examCatalog = await client.query<{ id: string; code: string }>(
-      `SELECT id, code FROM lab.exam_catalog WHERE tenant_id IS NULL`,
-    );
-    const examByCode = new Map(examCatalog.rows.map((r) => [r.code, r.id]));
+    // Carteira da base gerada. O reforço só aparece um ano depois da aplicação,
+    // então parte das doses fica datada do ano anterior: é isso que dá conteúdo
+    // à tela de reforços vencidos e a vencer.
+    const preventiveRng = makeRng(0x07a1c0de);
+    for (const generated of PATIENTS) {
+      if (!generated.key.startsWith('px')) continue;
+      const patientId = patientIds.get(generated.key);
+      if (!patientId) continue;
+
+      const catalog = VACCINES_BY_SPECIES[generated.speciesCode] ?? VACCINES_BY_SPECIES.default ?? [];
+      for (const vaccine of catalog.slice(0, preventiveRng() < 0.5 ? 2 : 1)) {
+        const administeredDay = -365 - Math.floor(preventiveRng() * 45) + Math.floor(preventiveRng() * 90);
+        const administered = at(today, administeredDay, 10, 30);
+        await client.query(
+          `INSERT INTO immunization.immunizations
+             (tenant_id, patient_id, vaccine_name, manufacturer, lot_number, expires_at, administered_at,
+              professional_id, administered_by_user_id, route, site, dose_number, next_due_at, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'sc','Região escapular',$10,$11,'completed')`,
+          [
+            tenantId,
+            patientId,
+            vaccine.name,
+            vaccine.manufacturer,
+            `LT${1000 + Math.floor(preventiveRng() * 8999)}`,
+            dateOnly(at(today, administeredDay + 540, 10)),
+            iso(administered),
+            vet1,
+            userVet1,
+            1 + Math.floor(preventiveRng() * 3),
+            dateOnly(at(today, administeredDay + 365, 10)),
+          ],
+        );
+      }
+
+      if (preventiveRng() < 0.7) {
+        const appliedDay = -Math.floor(preventiveRng() * 150);
+        const kind = preventiveRng() < 0.6 ? 'deworming' : 'ectoparasite';
+        await client.query(
+          `INSERT INTO immunization.preventive_treatments
+             (tenant_id, patient_id, kind, product_name, administered_at, professional_id,
+              administered_by_user_id, dose_text, next_due_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            tenantId,
+            patientId,
+            kind,
+            kind === 'deworming' ? 'Vermífugo de amplo espectro' : 'Antipulgas e carrapatos de uso tópico',
+            iso(at(today, appliedDay, 11)),
+            vet1,
+            userVet1,
+            kind === 'deworming' ? '1 comprimido por 10 kg' : '1 pipeta conforme faixa de peso',
+            dateOnly(at(today, appliedDay + 90, 11)),
+          ],
+        );
+      }
+    }
 
     // pedido resultado: perfil renal da Nina (paciente renal crônico)
     const ninaId = patientIds.get('p4');
-    const ninaEncounter = encounterByAgenda.get(1);
+    const ninaEncounter = encounterByTag.get('nina-renal');
     if (ninaId && ninaEncounter) {
       const orderId = uuidv7();
       const orderNumber = await nextNumber(client, tenantId, 'exam_order');
@@ -1119,7 +1623,7 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
 
     // pedido aguardando resultado: hemograma do Bidu (atendimento em curso)
     const biduId = patientIds.get('p3');
-    const biduEncounter = encounterByAgenda.get(7);
+    const biduEncounter = encounterByTag.get('bidu-otite');
     if (biduId && biduEncounter) {
       const orderId = uuidv7();
       const orderNumber = await nextNumber(client, tenantId, 'exam_order');
@@ -1265,6 +1769,53 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
     throw error;
   } finally {
     await client.end();
+  }
+}
+
+/**
+ * Algumas tabelas são append-only: um gatilho recusa DELETE nelas (log de
+ * auditoria, notas clínicas, movimentação de estoque). Como remover o tenant de
+ * demonstração cascateia até essas tabelas, a limpeza precisa suspender os
+ * gatilhos, e só o dono da tabela pode fazer isso. Por isso roda numa conexão
+ * própria, com o papel de migração.
+ *
+ * As tabelas saem do catálogo em vez de uma lista fixa, para que um gatilho
+ * novo em outra migração não volte a quebrar o seed.
+ */
+const APP_SCHEMAS = [
+  'platform', 'iam', 'registry', 'scheduling', 'clinical',
+  'lab', 'immunization', 'documents', 'billing', 'inventory', 'audit',
+];
+
+async function purgeDemoTenants(connectionString: string): Promise<void> {
+  const owner = new Client({ connectionString });
+  await owner.connect();
+  try {
+    const { rows } = await owner.query<{ table_name: string }>(
+      `SELECT DISTINCT quote_ident(n.nspname) || '.' || quote_ident(c.relname) AS table_name
+         FROM pg_trigger t
+         JOIN pg_class c ON c.oid = t.tgrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE NOT t.tgisinternal
+          AND (t.tgtype & 8) <> 0
+          AND n.nspname = ANY($1::text[])`,
+      [APP_SCHEMAS],
+    );
+
+    await owner.query('BEGIN');
+    for (const { table_name: table } of rows) {
+      await owner.query(`ALTER TABLE ${table} DISABLE TRIGGER USER`);
+    }
+    await owner.query(`DELETE FROM platform.tenants WHERE slug IN ('demo','beta')`);
+    for (const { table_name: table } of rows) {
+      await owner.query(`ALTER TABLE ${table} ENABLE TRIGGER USER`);
+    }
+    await owner.query('COMMIT');
+  } catch (error) {
+    await owner.query('ROLLBACK');
+    throw error;
+  } finally {
+    await owner.end();
   }
 }
 
@@ -1644,3 +2195,271 @@ function clinicalContent(patientKey: string, serviceKey: string): ClinicalConten
   }
 }
 
+
+// ============================================ conteúdo dos itens em volume
+// Faixas fisiológicas por espécie. Servem para gerar sinais vitais plausíveis
+// nos atendimentos de volume, sem precisar de texto clínico escrito à mão.
+const VITAL_RANGES: Record<string, { temp: [number, number]; hr: [number, number]; rr: [number, number] }> = {
+  dog: { temp: [37.9, 39.2], hr: [70, 130], rr: [18, 34] },
+  cat: { temp: [38.0, 39.2], hr: [140, 200], rr: [20, 40] },
+  bird: { temp: [40.0, 42.0], hr: [300, 500], rr: [25, 45] },
+  reptile: { temp: [24.0, 32.0], hr: [40, 80], rr: [8, 20] },
+  horse: { temp: [37.2, 38.5], hr: [28, 44], rr: [8, 16] },
+  cattle: { temp: [37.8, 39.3], hr: [48, 84], rr: [18, 30] },
+  rabbit: { temp: [38.3, 39.5], hr: [180, 250], rr: [30, 60] },
+  rodent: { temp: [37.0, 39.0], hr: [250, 400], rr: [40, 80] },
+};
+
+const VACCINES_BY_SPECIES: Record<string, Array<{ name: string; manufacturer: string }>> = {
+  dog: [
+    { name: 'V10 (polivalente canina)', manufacturer: 'Zoetis' },
+    { name: 'Antirrábica', manufacturer: 'MSD' },
+    { name: 'Tosse dos canis (Bordetella)', manufacturer: 'Zoetis' },
+  ],
+  cat: [
+    { name: 'V4 (quádrupla felina)', manufacturer: 'Zoetis' },
+    { name: 'Antirrábica', manufacturer: 'MSD' },
+    { name: 'Leucemia felina (FeLV)', manufacturer: 'Boehringer' },
+  ],
+  rabbit: [{ name: 'Mixomatose', manufacturer: 'Filavie' }],
+  horse: [
+    { name: 'Influenza equina', manufacturer: 'Boehringer' },
+    { name: 'Tétano', manufacturer: 'Zoetis' },
+  ],
+  cattle: [
+    { name: 'Febre aftosa', manufacturer: 'Ourofino' },
+    { name: 'Clostridioses', manufacturer: 'MSD' },
+  ],
+  default: [{ name: 'Antirrábica', manufacturer: 'MSD' }],
+};
+
+interface AnalyteSeed {
+  code: string;
+  name: string;
+  uom: string;
+  min: number;
+  max: number;
+}
+
+const EXAM_PANELS: Array<{ code: string; analytes: AnalyteSeed[]; interpretations: string[] }> = [
+  {
+    code: 'CBC',
+    analytes: [
+      { code: 'RBC', name: 'Hemácias', uom: 'milhões/uL', min: 5.5, max: 8.5 },
+      { code: 'HGB', name: 'Hemoglobina', uom: 'g/dL', min: 12, max: 18 },
+      { code: 'HCT', name: 'Hematócrito', uom: '%', min: 37, max: 55 },
+      { code: 'WBC', name: 'Leucócitos totais', uom: '/uL', min: 6000, max: 17000 },
+      { code: 'PLT', name: 'Plaquetas', uom: '/uL', min: 200000, max: 500000 },
+    ],
+    interpretations: [
+      'Série vermelha e branca dentro da normalidade.',
+      'Discreta leucocitose, sem desvio à esquerda.',
+      'Sem alterações relevantes para a queixa apresentada.',
+    ],
+  },
+  {
+    code: 'BIOQ_RENAL',
+    analytes: [
+      { code: 'UREA', name: 'Ureia', uom: 'mg/dL', min: 20, max: 65 },
+      { code: 'CREA', name: 'Creatinina', uom: 'mg/dL', min: 0.8, max: 1.8 },
+      { code: 'SDMA', name: 'SDMA', uom: 'ug/dL', min: 0, max: 14 },
+    ],
+    interpretations: [
+      'Função renal preservada no momento da coleta.',
+      'Valores no limite superior, sugerida repetição em 30 dias.',
+      'Sem azotemia. Manter acompanhamento de rotina.',
+    ],
+  },
+];
+
+const GENERIC_DIAGNOSES: Record<string, string[]> = {
+  consulta: [
+    'Gastroenterite inespecífica',
+    'Dermatite alérgica',
+    'Doença periodontal grau 2',
+    'Otite externa',
+    'Obesidade',
+    'Traqueobronquite',
+  ],
+  retorno: ['Evolução favorável do quadro anterior', 'Quadro em remissão', 'Boa resposta ao tratamento instituído'],
+  emergencia: ['Gastroenterite aguda', 'Desidratação moderada', 'Dor abdominal em investigação'],
+  'consulta-exotico': ['Erro de manejo alimentar', 'Estase gastrintestinal', 'Hipovitaminose'],
+  'atendimento-campo': ['Casco com lesão de linha branca', 'Endoparasitose', 'Balanço energético negativo'],
+  procedimento: ['Ferida cutânea em cicatrização', 'Abscesso subcutâneo drenado'],
+  teleorientacao: ['Orientação prestada, sem sinais de urgência'],
+  'exame-imagem': ['Exame de imagem sem achados relevantes'],
+  'coleta-exames': ['Coleta realizada para investigação'],
+};
+
+const GENERIC_DRUGS: DrugSeed[] = [
+  {
+    name: 'Meloxicam 0,5 mg/mL',
+    ingredient: 'Meloxicam',
+    concentration: '0,5 mg/mL',
+    dose: 0.1,
+    doseUom: 'mg/kg',
+    perKg: true,
+    route: 'oral',
+    everyHours: 24,
+    days: 3,
+    instructions: 'Administrar após a alimentação, uma vez ao dia.',
+  },
+  {
+    name: 'Amoxicilina com clavulanato 250 mg',
+    ingredient: 'Amoxicilina',
+    concentration: '250 mg',
+    dose: 12.5,
+    doseUom: 'mg/kg',
+    perKg: true,
+    route: 'oral',
+    everyHours: 12,
+    days: 7,
+    instructions: 'Completar o ciclo mesmo com melhora dos sinais.',
+  },
+  {
+    name: 'Omeprazol 10 mg',
+    ingredient: 'Omeprazol',
+    concentration: '10 mg',
+    dose: 1,
+    doseUom: 'mg/kg',
+    perKg: true,
+    route: 'oral',
+    everyHours: 24,
+    days: 10,
+    instructions: 'Administrar em jejum, 30 minutos antes da primeira refeição.',
+  },
+  {
+    name: 'Metronidazol 250 mg',
+    ingredient: 'Metronidazol',
+    concentration: '250 mg',
+    dose: 15,
+    doseUom: 'mg/kg',
+    perKg: true,
+    route: 'oral',
+    everyHours: 12,
+    days: 5,
+    instructions: 'Administrar com alimento para reduzir náusea.',
+  },
+];
+
+const LARGE_ANIMAL_DRUGS: DrugSeed[] = [
+  {
+    name: 'Oxitetraciclina longa ação',
+    ingredient: 'Oxitetraciclina',
+    concentration: '200 mg/mL',
+    dose: 20,
+    doseUom: 'mg/kg',
+    perKg: true,
+    route: 'intramuscular',
+    everyHours: 48,
+    days: 4,
+    instructions: 'Dividir o volume em dois pontos de aplicação.',
+    withdrawalMeat: 28,
+    withdrawalMilk: 7,
+  },
+  {
+    name: 'Flunixin meglumine',
+    ingredient: 'Flunixin',
+    concentration: '50 mg/mL',
+    dose: 1.1,
+    doseUom: 'mg/kg',
+    perKg: true,
+    route: 'intravenous',
+    everyHours: 24,
+    days: 3,
+    instructions: 'Aplicação lenta, estritamente intravenosa.',
+    withdrawalMeat: 10,
+    withdrawalMilk: 4,
+  },
+];
+
+const GENERIC_PROCEDURES = [
+  'Aferição de sinais vitais',
+  'Limpeza otológica',
+  'Curativo simples',
+  'Tricotomia e antissepsia',
+  'Fluidoterapia subcutânea',
+];
+
+/** Semente estável a partir de um texto, para o volume sair igual a cada seed. */
+function seedFor(text: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Conteúdo clínico dos atendimentos gerados em volume. Não substitui os casos
+ * curados: serve para que todo atendimento do histórico tenha nota, sinal
+ * vital, diagnóstico e, parte deles, receita e procedimento.
+ */
+function genericContent(patient: SeedPatient | undefined, serviceKey: string, rng: () => number): ClinicalContent {
+  const species = patient?.speciesCode ?? 'dog';
+  const vitals = VITAL_RANGES[species] ?? VITAL_RANGES.dog;
+  const large = species === 'horse' || species === 'cattle';
+
+  if (serviceKey === 'banho-tosa') {
+    return { notes: {}, observations: [], diagnoses: [], prescriptions: [], procedures: [] };
+  }
+
+  const observations: ClinicalContent['observations'] = [];
+  if (vitals) {
+    observations.push({ code: 'temperature', value: between(rng, vitals.temp[0], vitals.temp[1], 1), uom: 'C' });
+    observations.push({ code: 'heart_rate', value: between(rng, vitals.hr[0], vitals.hr[1]), uom: 'bpm' });
+    observations.push({ code: 'respiratory_rate', value: between(rng, vitals.rr[0], vitals.rr[1]), uom: 'mpm' });
+  }
+  if (patient) {
+    const drift = 0.95 + rng() * 0.1;
+    observations.push({ code: 'weight', value: Number((patient.weightKg * drift).toFixed(3)), uom: 'kg' });
+  }
+  if (rng() < 0.6) observations.push({ code: 'mucous_membranes', valueCode: 'rosadas' });
+  if (rng() < 0.4) observations.push({ code: 'capillary_refill_time', value: between(rng, 1, 2, 1), uom: 's' });
+  if (rng() < 0.3) observations.push({ code: 'body_condition_score', value: between(rng, 4, 7), uom: 'escore' });
+
+  const diagnosisPool = GENERIC_DIAGNOSES[serviceKey] ?? GENERIC_DIAGNOSES.consulta ?? [];
+  const diagnosis = diagnosisPool.length ? pick(rng, diagnosisPool) : 'Quadro clínico em investigação';
+
+  const notes: ClinicalContent['notes'] = {
+    triage: pick(rng, [
+      'Animal alerta, responsivo ao manejo.',
+      'Paciente calmo, aceita contenção sem resistência.',
+      'Animal apreensivo, contenção mínima suficiente.',
+    ]),
+    physical_exam: [
+      'Exame físico geral sem alterações significativas fora da queixa.',
+      'Mucosas normocoradas e linfonodos sem alteração à palpação.',
+      'Auscultação cardiorrespiratória sem sopros ou ruídos adventícios.',
+    ].join(' '),
+    assessment: diagnosis,
+    plan: pick(rng, [
+      'Tratamento instituído e orientações repassadas ao tutor. Retorno em 15 dias.',
+      'Manter dieta atual e reavaliar em 30 dias.',
+      'Orientado sinal de alerta para retorno imediato.',
+      'Solicitados exames complementares para fechar o diagnóstico.',
+    ]),
+  };
+
+  const prescriptions: ClinicalContent['prescriptions'] = [];
+  if (serviceKey !== 'teleorientacao' && serviceKey !== 'coleta-exames' && rng() < 0.65) {
+    const pool = large ? LARGE_ANIMAL_DRUGS : GENERIC_DRUGS;
+    const first = pick(rng, pool);
+    const items: DrugSeed[] = [first];
+    if (rng() < 0.35) {
+      const second = pick(rng, pool);
+      if (second.name !== first.name) items.push(second);
+    }
+    prescriptions.push({
+      kind: 'simple',
+      notes: large ? 'Respeitar o período de carência informado para carne e leite.' : undefined,
+      items,
+    });
+  }
+
+  const procedures: string[] = [];
+  if (rng() < 0.4) procedures.push(pick(rng, GENERIC_PROCEDURES));
+
+  return { notes, observations, diagnoses: [{ description: diagnosis, kind: 'final' }], prescriptions, procedures };
+}
