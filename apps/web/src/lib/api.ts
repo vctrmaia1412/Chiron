@@ -78,14 +78,22 @@ export interface RequestOptions {
 }
 
 function buildUrl(path: string, query?: RequestOptions['query']): string {
-  const url = new URL(`${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`);
-  if (query) {
-    for (const [key, value] of Object.entries(query)) {
-      if (value === null || value === undefined || value === '') continue;
-      url.searchParams.set(key, String(value));
-    }
+  // A base é relativa por padrão (`/api/v1`), porque o navegador fala com o
+  // proxy na mesma origem. `new URL` recusa caminho relativo sem base, então a
+  // query é montada à mão: assim vale tanto para a base relativa quanto para
+  // uma URL absoluta em desenvolvimento fora do Docker.
+  const target = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  if (!query) return target;
+
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === null || value === undefined || value === '') continue;
+    params.set(key, String(value));
   }
-  return url.toString();
+
+  const search = params.toString();
+  if (!search) return target;
+  return `${target}${target.includes('?') ? '&' : '?'}${search}`;
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
