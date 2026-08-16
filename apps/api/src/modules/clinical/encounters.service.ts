@@ -584,6 +584,15 @@ export class EncountersService {
         [ctx.tenantId, encounterId],
       );
 
+      // A nota anterior é marcada antes da inserção: o índice único de nota
+      // ativa por tipo é imediato, então as duas não podem coexistir ativas.
+      await tx.query(
+        `UPDATE clinical.encounter_notes
+            SET status = 'amended', superseded_by_note_id = $3, superseded_at = now()
+          WHERE id = $1 AND tenant_id = $2`,
+        [noteId, ctx.tenantId, newId],
+      );
+
       await tx.query(
         `INSERT INTO clinical.encounter_notes
            (id, tenant_id, encounter_id, patient_id, kind, title, body, author_professional_id,
@@ -602,13 +611,6 @@ export class EncountersService {
           noteId,
           sequenceResult.rows[0]?.next_seq ?? 1,
         ],
-      );
-
-      await tx.query(
-        `UPDATE clinical.encounter_notes
-            SET status = 'amended', superseded_by_note_id = $3, superseded_at = now()
-          WHERE id = $1 AND tenant_id = $2`,
-        [noteId, ctx.tenantId, newId],
       );
 
       await this.audit.record(tx, ctx, {
@@ -1180,22 +1182,15 @@ export class EncountersService {
            AND n.kind IN ('procedure_note','anesthesia_note') AND n.body <> '')::text AS procedure_note,
         (SELECT count(*) FROM clinical.encounter_diagnoses d WHERE d.tenant_id = $1 AND d.encounter_id = $2)::text AS diagnoses,
         (SELECT count(*) FROM clinical.encounter_procedures p WHERE p.tenant_id = $1 AND p.encounter_id = $2)::text AS procedures,
-        (SELECT count(*) FROM immunization.immunizations i WHERE i.tenant_id = $1 AND i.encounter_id = $2
-           AND i.status = 'completed')::text
-        + (SELECT count(*) FROM immunization.preventive_treatments pt WHERE pt.tenant_id = $1 AND pt.encounter_id = $2)::text AS immunizations,
+        (
+          (SELECT count(*) FROM immunization.immunizations i WHERE i.tenant_id = $1 AND i.encounter_id = $2
+             AND i.status = 'completed')
+          + (SELECT count(*) FROM immunization.preventive_treatments pt
+              WHERE pt.tenant_id = $1 AND pt.encounter_id = $2)
+        )::text AS immunizations,
         (SELECT count(*) FROM lab.exam_orders o WHERE o.tenant_id = $1 AND o.encounter_id = $2
            AND o.status <> 'cancelled')::text AS exams,
         (SELECT count(*) FROM clinical.observations ob WHERE ob.tenant_id = $1 AND ob.encounter_id = $2)::text AS observations`,
-      [ctx.tenantId, encounterId],
-    );
-
-    const counts = await tx.query<{ immunizations: string }>(
-      `SELECT (
-         (SELECT count(*) FROM immunization.immunizations i
-           WHERE i.tenant_id = $1 AND i.encounter_id = $2 AND i.status = 'completed')
-         + (SELECT count(*) FROM immunization.preventive_treatments pt
-             WHERE pt.tenant_id = $1 AND pt.encounter_id = $2)
-       )::text AS immunizations`,
       [ctx.tenantId, encounterId],
     );
 
@@ -1207,7 +1202,7 @@ export class EncountersService {
       hasProcedureNote: Number(r?.procedure_note ?? '0') > 0,
       diagnosisCount: Number(r?.diagnoses ?? '0'),
       procedureCount: Number(r?.procedures ?? '0'),
-      immunizationCount: Number(counts.rows[0]?.immunizations ?? '0'),
+      immunizationCount: Number(r?.immunizations ?? '0'),
       examOrderCount: Number(r?.exams ?? '0'),
       observationCount: Number(r?.observations ?? '0'),
       justification: justification ?? null,

@@ -111,6 +111,8 @@ function mapDatabaseError(error: DatabaseError): { code: ErrorCode; message: str
       };
     case '23P01': // exclusion_violation
       return { code: 'CONFLICT', message: 'Conflito de horário: já existe agendamento nesse intervalo.' };
+    case '22P02': // invalid_text_representation (uuid, número, data malformados)
+      return { code: 'VALIDATION_FAILED', message: 'Identificador ou valor em formato inválido.' };
     case '42501': // insufficient_privilege (triggers append-only)
       return { code: 'FORBIDDEN', message: 'Operação não permitida sobre um registro imutável.' };
     default:

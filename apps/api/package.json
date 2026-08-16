@@ -9,7 +9,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --ext .ts --max-warnings 0",
-    "test": "vitest run --dir src",
+    "test": "vitest run --dir src --passWithNoTests",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:migrate": "tsx src/database/migrate.ts",
     "db:seed": "tsx src/database/seed.ts",
@@ -44,11 +44,13 @@
     "@chiron/config": "workspace:*",
     "@nestjs/cli": "^11.0.24",
     "@nestjs/testing": "^11.1.6",
+    "@swc/core": "^1.16.0",
     "@types/node": "^22.15.3",
     "@types/pdfkit": "^0.17.3",
     "@types/pg": "^8.15.5",
     "tsx": "^4.20.5",
     "typescript": "^5.9.3",
+    "unplugin-swc": "^1.5.11",
     "vitest": "^3.2.4"
   }
 }

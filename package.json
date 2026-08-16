@@ -19,7 +19,8 @@
     "infra:up": "docker compose -f infra/compose/docker-compose.dev.yml up -d",
     "infra:down": "docker compose -f infra/compose/docker-compose.dev.yml down",
     "infra:logs": "docker compose -f infra/compose/docker-compose.dev.yml logs -f",
-    "infra:nuke": "docker compose -f infra/compose/docker-compose.dev.yml down -v"
+    "infra:nuke": "docker compose -f infra/compose/docker-compose.dev.yml down -v",
+    "test:all": "pnpm test && pnpm test:integration"
   },
   "devDependencies": {
     "turbo": "^2.5.5",
@@ -31,7 +32,8 @@
       "esbuild",
       "unrs-resolver",
       "@node-rs/argon2",
-      "pdfkit"
+      "pdfkit",
+      "@swc/core"
     ]
   }
 }

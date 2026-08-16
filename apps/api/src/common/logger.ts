@@ -28,8 +28,9 @@ export const logger = pino({
     censor: '[redacted]',
   },
   base: { service: 'chiron-api' },
+  // Em teste o transporte por worker esconde a saída do runner: escrita direta.
   transport:
-    process.env.NODE_ENV !== 'production'
+    process.env.NODE_ENV !== 'production' && process.env.APP_ENV !== 'test'
       ? { target: 'pino/file', options: { destination: 1 } }
       : undefined,
 });

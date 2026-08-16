@@ -3,6 +3,9 @@ import { Reflector } from '@nestjs/core';
 import { MODULE_BY_KEY, isReadOnlyPermission, LICENSE_REQUIRED_PERMISSIONS } from '@chiron/contracts';
 import { AppError } from '../common/errors';
 import { env } from '../config/env';
+import { logger } from '../common/logger';
+import { AuditService } from '../common/audit.service';
+import { DatabaseService } from '../database/database.service';
 import { SessionService } from './session.service';
 import {
   ALLOW_NO_TENANT_KEY,
@@ -11,7 +14,8 @@ import {
   STEP_UP_KEY,
   type AuthorizeMetadata,
 } from './authorize.decorator';
-import type { AuthedRequest } from '../common/request-context';
+import type { AuthedRequest, RequestContext } from '../common/request-context';
+import { contextToTenantContext } from '../common/request-context';
 
 /**
  * Cadeia única de autorização (documento, seção 14.3):
@@ -26,6 +30,8 @@ export class AuthorizationGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly sessions: SessionService,
+    private readonly db: DatabaseService,
+    private readonly audit: AuditService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -84,11 +90,13 @@ export class AuthorizationGuard implements CanActivate {
     const state = ctx.entitlements.get(meta.module) ?? (moduleDef?.alwaysOn ? 'active' : 'disabled');
 
     if (state === 'disabled') {
+      await this.recordDenial(ctx, request, meta, 'module_not_enabled');
       throw new AppError('MODULE_NOT_ENABLED', `O módulo ${moduleDef?.name ?? meta.module} não está habilitado.`, {
         module: meta.module,
       });
     }
     if (state === 'suspended' && !isReadOnlyPermission(meta.permission)) {
+      await this.recordDenial(ctx, request, meta, 'module_suspended');
       throw new AppError('MODULE_SUSPENDED', `O módulo ${moduleDef?.name ?? meta.module} está suspenso.`, {
         module: meta.module,
       });
@@ -96,11 +104,13 @@ export class AuthorizationGuard implements CanActivate {
 
     // ---- permissão
     if (!ctx.permissions.has(meta.permission)) {
+      await this.recordDenial(ctx, request, meta, 'missing_permission');
       throw AppError.forbidden('Seu perfil não permite esta ação.', { permission: meta.permission });
     }
 
     // ---- licença profissional para assinatura clínica
     if ((LICENSE_REQUIRED_PERMISSIONS as readonly string[]).includes(meta.permission) && !ctx.isLicensed) {
+      await this.recordDenial(ctx, request, meta, 'license_required');
       throw new AppError(
         'LICENSE_REQUIRED',
         'Esta ação exige um profissional com registro de conselho válido no cadastro.',
@@ -121,9 +131,36 @@ export class AuthorizationGuard implements CanActivate {
 
     // ---- impersonação somente leitura
     if (ctx.principalType === 'platform_staff' && method !== 'GET' && ctx.onBehalfOf) {
+      await this.recordDenial(ctx, request, meta, 'support_read_only');
       throw AppError.forbidden('Acesso de suporte está limitado a leitura.');
     }
 
     return true;
+  }
+
+  /**
+   * Toda negativa vira registro de auditoria. Sem isso, a tentativa de acesso
+   * indevido some, e é justamente ela que interessa em uma investigação.
+   * A falha ao auditar nunca libera o acesso: apenas registra o problema.
+   */
+  private async recordDenial(
+    ctx: RequestContext,
+    request: AuthedRequest,
+    meta: AuthorizeMetadata,
+    reason: string,
+  ): Promise<void> {
+    if (!ctx.tenantId) return;
+    try {
+      await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+        await this.audit.record(tx, ctx, {
+          category: 'access_denied',
+          action: `${request.method.toUpperCase()} ${request.url}`,
+          reason,
+          after: { module: meta.module, permission: meta.permission },
+        });
+      });
+    } catch (error) {
+      logger.warn({ err: error, requestId: ctx.requestId }, 'Não foi possível auditar a negativa de acesso');
+    }
   }
 }
