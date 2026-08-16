@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTimeSchema, paginationQuerySchema, shortTextSchema, uuidSchema } from './common';
+import { isoDateTimeSchema, paginationQuerySchema, queryBoolean, shortTextSchema, uuidSchema } from './common';
 import {
   abnormalFlagSchema,
   examCategorySchema,
@@ -122,5 +122,5 @@ export const listExamOrdersQuerySchema = paginationQuerySchema.extend({
   status: examOrderStatusSchema.optional(),
   patientId: uuidSchema.optional(),
   encounterId: uuidSchema.optional(),
-  pending: z.coerce.boolean().optional(),
+  pending: queryBoolean.optional(),
 });

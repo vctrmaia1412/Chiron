@@ -3,6 +3,20 @@ import { config as loadDotenv } from './dotenv';
 
 loadDotenv();
 
+/**
+ * `z.coerce.boolean()` usa `Boolean(valor)`, e a string "false" é verdadeira.
+ * Em variável de ambiente isso liga silenciosamente o que deveria estar
+ * desligado, então a leitura é explícita.
+ */
+const envBoolean = (defaultValue: boolean) =>
+  z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (value === undefined || value.trim() === '') return defaultValue;
+      return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+    });
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_ENV: z.enum(['dev', 'test', 'homolog', 'prod']).default('dev'),
@@ -23,7 +37,7 @@ const envSchema = z.object({
   S3_BUCKET: z.string().default('chiron'),
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),
-  S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  S3_FORCE_PATH_STYLE: envBoolean(true),
   FILES_PUBLIC_HOST: z.string().optional(),
 
   PUBLIC_APP_URL: z.string().default('http://localhost:3000'),
@@ -34,7 +48,7 @@ const envSchema = z.object({
   SESSION_ABSOLUTE_DAYS: z.coerce.number().int().default(30),
   STEP_UP_MAX_AGE_MIN: z.coerce.number().int().default(5),
   COOKIE_NAME: z.string().default('chiron_session'),
-  COOKIE_SECURE: z.coerce.boolean().default(false),
+  COOKIE_SECURE: envBoolean(false),
 
   COLUMN_ENCRYPTION_KEY: z.string().min(32),
   COLUMN_HASH_KEY: z.string().min(32),

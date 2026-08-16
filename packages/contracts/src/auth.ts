@@ -30,6 +30,7 @@ export const loginResponseSchema = z.object({
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
 export const moduleStateSchema = z.enum(['active', 'trial', 'suspended', 'disabled']);
+export type ModuleState = z.infer<typeof moduleStateSchema>;
 
 export const meContextSchema = z.object({
   user: z.object({

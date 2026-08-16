@@ -16,6 +16,17 @@ export const decimalSchema = z
   .regex(/^-?\d{1,12}(\.\d{1,4})?$/, 'Número decimal inválido')
   .describe('Decimal com até quatro casas');
 
+/**
+ * Booleano vindo de query string. `z.coerce.boolean()` não serve: ele usa
+ * `Boolean(valor)`, e a string "false" é verdadeira, o que inverte o filtro
+ * sem avisar.
+ */
+export const queryBoolean = z
+  .union([z.boolean(), z.string()])
+  .transform((value) =>
+    typeof value === 'boolean' ? value : ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase()),
+  );
+
 export const paginationQuerySchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),

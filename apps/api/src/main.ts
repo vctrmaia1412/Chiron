@@ -29,6 +29,25 @@ export async function createApp(): Promise<NestFastifyApplication> {
     crossOriginResourcePolicy: { policy: 'same-site' },
   });
 
+  // A sessão viaja em cookie, então a origem permitida é explícita e curta:
+  // nada de `*`, que o navegador recusa junto de credenciais de qualquer forma.
+  const allowedOrigins = new Set(
+    [cfg.PUBLIC_APP_URL, ...(cfg.APP_ENV === 'dev' ? ['http://localhost:3000', 'http://127.0.0.1:3000'] : [])].filter(
+      Boolean,
+    ),
+  );
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      callback(new Error('Origem não permitida'), false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Chiron-Tenant', 'X-Request-Id'],
+    exposedHeaders: ['x-request-id'],
+    maxAge: 600,
+  });
+
   const instance = app.getHttpAdapter().getInstance();
 
   // request id disponível em todo o ciclo

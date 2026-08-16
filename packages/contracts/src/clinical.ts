@@ -5,6 +5,7 @@ import {
   paginationQuerySchema,
   shortTextSchema,
   uuidSchema,
+  queryBoolean,
 } from './common';
 import {
   abnormalFlagSchema,
@@ -234,7 +235,7 @@ export const listEncountersQuerySchema = paginationQuerySchema.extend({
   from: isoDateTimeSchema.optional(),
   to: isoDateTimeSchema.optional(),
   q: z.string().trim().max(120).optional(),
-  open: z.coerce.boolean().optional(),
+  open: queryBoolean.optional(),
 });
 
 // ----------------------------------------------------------- prescription

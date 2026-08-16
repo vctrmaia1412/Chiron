@@ -1,102 +1,203 @@
 @import "tailwindcss";
 
+/*
+  Identidade CHIRON: verde clínico profundo sobre fundo levemente esverdeado,
+  tipografia densa e cantos discretos. Nada de gradiente decorativo nem de
+  card dentro de card: a informação clínica é o elemento visual.
+*/
 :root {
-  --background: #F7FAF9;
-  --foreground: #172126;
-  --muted: #64748B;
-  --brand: #0F766E;
-  --brand-dark: #115E59;
-  --brand-blue: #1E3A5F;
-  --card: #FFFFFF;
-  --mobile-nav-height: 74px;
+  --bg: #f6f8f8;
+  --surface: #ffffff;
+  --surface-2: #f1f5f4;
+  --surface-3: #e6edeb;
+  --border: #dde5e3;
+  --border-strong: #c6d3d0;
+
+  --ink: #10201f;
+  --ink-2: #40514f;
+  --ink-3: #6b807d;
+  --ink-inverse: #ffffff;
+
+  --brand: #0f766e;
+  --brand-hover: #0c625b;
+  --brand-soft: #e3f2ef;
+  --brand-ink: #08403b;
+
+  --danger: #b42318;
+  --danger-soft: #fdeceb;
+  --warning: #b45309;
+  --warning-soft: #fdf3e5;
+  --success: #15803d;
+  --success-soft: #e8f5ec;
+  --info: #1d4ed8;
+  --info-soft: #e8eefc;
+
+  --radius: 10px;
+  --radius-sm: 7px;
+  --radius-lg: 14px;
+
+  --shadow-sm: 0 1px 2px rgba(16, 32, 31, 0.06);
+  --shadow: 0 2px 8px rgba(16, 32, 31, 0.07);
+  --shadow-lg: 0 12px 32px rgba(16, 32, 31, 0.14);
+
+  --header-h: 56px;
+  --mobilenav-h: 60px;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --radius-app: var(--radius);
   --font-sans: var(--font-sans);
 }
 
+* {
+  border-color: var(--border);
+}
+
 html {
-  scroll-behavior: smooth;
-  background: var(--background);
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   min-width: 320px;
   min-height: 100dvh;
-  overflow-x: hidden;
-  overflow-y: auto;
+  font-size: 15px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;
-  pointer-events: auto;
+  overscroll-behavior-y: none;
 }
 
-* {
-  box-sizing: border-box;
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-  pointer-events: auto;
-  touch-action: manipulation;
-}
-
-button,
-input,
-a {
-  min-height: 2.75rem;
-  pointer-events: auto;
-}
-
-img,
-svg {
-  display: block;
-  max-width: 100%;
-}
-
-main,
-section,
-aside,
-div {
-  max-width: 100%;
-}
-
-@media (max-width: 768px) {
-  html {
-    font-size: 14px;
+/* O teclado virtual não pode empurrar a barra inferior sobre o campo ativo. */
+@supports (height: 100dvh) {
+  .app-shell {
+    min-height: 100dvh;
   }
+}
 
-  body {
-    font-size: 14px;
-  }
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+.safe-top {
+  padding-top: max(env(safe-area-inset-top), 0px);
+}
 
+/* Alvo de toque mínimo em telas pequenas. */
+@media (pointer: coarse) {
   button,
+  a[role="button"],
+  [data-touch-target] {
+    min-height: 44px;
+  }
+}
+
+input,
+textarea,
+select {
+  font-size: 16px; /* evita o zoom automático do iOS ao focar */
+}
+
+@media (min-width: 768px) {
   input,
-  select,
-  textarea {
-    border-radius: 0.9rem;
+  textarea,
+  select {
+    font-size: 15px;
   }
 }
 
-@media (max-width: 390px) {
-  html {
-    font-size: 13px;
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes chiron-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+.animate-in-soft {
+  animation: chiron-fade-in 160ms ease-out;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(15, 118, 110, 0.25);
-  border-radius: 999px;
+@keyframes chiron-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.animate-sheet-up {
+  animation: chiron-sheet-up 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes chiron-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.animate-soft-pulse {
+  animation: chiron-pulse 1.4s ease-in-out infinite;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
 }

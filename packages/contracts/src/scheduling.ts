@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTimeSchema, paginationQuerySchema, uuidSchema } from './common';
+import { isoDateTimeSchema, paginationQuerySchema, queryBoolean, uuidSchema } from './common';
 import {
   appointmentPrioritySchema,
   appointmentSourceSchema,
@@ -122,7 +122,7 @@ export type FollowUp = z.infer<typeof followUpSchema>;
 
 export const listFollowUpsQuerySchema = paginationQuerySchema.extend({
   dueUntil: z.string().optional(),
-  includeScheduled: z.coerce.boolean().default(false),
+  includeScheduled: queryBoolean.default(false),
 });
 
 export const resourceSchema = z.object({
