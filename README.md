@@ -108,6 +108,9 @@ estado vem da API. O navegador não guarda prontuário.
   autenticação e fluxo clínico.
 - [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md): pronto, em
   andamento, bloqueado e próximo.
+- [`docs/PLANO_DE_LANCAMENTO.md`](docs/PLANO_DE_LANCAMENTO.md): o que falta
+  para vender, como colocar no ar sem custo, até onde a pilha gratuita
+  sustenta e como escalar. Fonte de verdade da próxima etapa.
 - [`docs/adr/`](docs/adr/): decisões arquiteturais com contexto e alternativas.
 - [`docs/CHIRON_MASTER_ANALYSIS.md`](docs/CHIRON_MASTER_ANALYSIS.md): análise
   que originou o projeto.

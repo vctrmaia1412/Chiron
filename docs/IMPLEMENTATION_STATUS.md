@@ -3,7 +3,7 @@
 Estado real do CHIRON, verificado por execução, não por intenção. Cada item
 marcado como pronto foi exercitado contra banco e API de verdade.
 
-Atualizado em 16 de agosto de 2026.
+Atualizado em 16 de agosto de 2026 (seed e riscos revisados no mesmo dia).
 
 ## Pronto
 
@@ -34,9 +34,11 @@ Atualizado em 16 de agosto de 2026.
 - Dados de referência sincronizados a partir dos contratos: 12 módulos, 4
   planos, 121 permissões, 18 espécies, 98 raças, 16 códigos de observação, 21
   exames e 23 faixas de referência.
-- Seed de demonstração com duas organizações, 7 usuários, 7 tutores, 12
-  pacientes de 8 espécies, 20 agendamentos, atendimentos finalizados com notas
-  assinadas, receitas, exames e vacinas.
+- Seed de demonstração com duas organizações, 8 usuários, 37 tutores, 72
+  pacientes de 8 espécies, 809 agendamentos cobrindo 90 dias de histórico, o
+  dia de hoje e 30 dias futuros com status alternados, atendimentos
+  finalizados com notas assinadas, receitas, exames, vacinas e itens de
+  cobrança em vários estados.
 
 ### Segurança e identidade
 
@@ -102,6 +104,18 @@ existe simplesmente não é oferecido.
 | Testes de interface | não implementado | O fluxo clínico é coberto por teste de integração na API. Falta teste de componente e navegador. |
 
 ## Riscos conhecidos
+
+A revisão de 16 de agosto de 2026 registrada em
+[PLANO_DE_LANCAMENTO.md](PLANO_DE_LANCAMENTO.md) encontrou, além dos itens
+abaixo, treze bloqueadores de venda que este documento não listava. Os que
+mais importam para quem for usar hoje: o botão Finalizar do atendimento não
+aparece na interface porque testa uma permissão inexistente
+(`encounter:finish` em vez de `encounter:sign`); datas sem hora aparecem um dia
+antes no navegador em fuso brasileiro; o aceite de convite emite sessão para
+usuário já existente sem pedir senha e o token bruto volta na resposta da
+API; não existe criação de organização fora do seed; nenhum e-mail é enviado,
+então redefinição de senha não funciona em produção; não existe backup. A
+lista completa, com evidência e correção, está no plano.
 
 **Sem verificação de vírus em arquivo enviado.** O upload confere magic bytes
 contra o tipo declarado e o campo `virus_scan_status` existe, mas nenhum
