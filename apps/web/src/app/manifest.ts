@@ -9,7 +9,7 @@ export default function manifest(): MetadataRoute.Manifest {
     display: 'standalone',
     background_color: '#f6f8f8',
     theme_color: '#0f766e',
-    orientation: 'portrait-primary',
+    // Sem travar orientação: o atendimento no tablet é feito em paisagem.
     icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
   };
 }

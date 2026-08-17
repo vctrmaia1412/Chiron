@@ -3,6 +3,7 @@ import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { DatabaseService } from './database/database.service';
 import { CryptoService } from './common/crypto.service';
 import { AuditService } from './common/audit.service';
+import { MailerService } from './common/mailer.service';
 import { AllExceptionsFilter } from './common/exception.filter';
 import { AuthorizationGuard } from './auth/authorization.guard';
 import { SessionService } from './auth/session.service';
@@ -13,6 +14,7 @@ import { MembersController } from './modules/identity/members.controller';
 import { MembersService } from './modules/identity/members.service';
 import { TenantController } from './modules/tenant/tenant.controller';
 import { TenantService } from './modules/tenant/tenant.service';
+import { ProvisioningService } from './modules/tenant/provisioning.service';
 import { CatalogController } from './modules/registry/catalog.controller';
 import { CatalogService } from './modules/registry/catalog.service';
 import { GuardiansController } from './modules/registry/guardians.controller';
@@ -45,8 +47,8 @@ import { AuditQueryService } from './modules/audit/audit-query.service';
 
 @Global()
 @Module({
-  providers: [DatabaseService, CryptoService, AuditService, SessionService],
-  exports: [DatabaseService, CryptoService, AuditService, SessionService],
+  providers: [DatabaseService, CryptoService, AuditService, SessionService, MailerService],
+  exports: [DatabaseService, CryptoService, AuditService, SessionService, MailerService],
 })
 export class CoreModule {}
 
@@ -75,6 +77,7 @@ export class CoreModule {}
     IdentityService,
     MembersService,
     TenantService,
+    ProvisioningService,
     CatalogService,
     GuardiansService,
     PatientsService,

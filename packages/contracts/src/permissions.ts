@@ -34,27 +34,40 @@ export interface ModuleDefinition {
   dependsOn: ModuleKey[];
   /** `core` está sempre ativo e não pode ser desabilitado. */
   alwaysOn: boolean;
+  /**
+   * `false` enquanto o módulo não tem rota na API: a chave e a tabela existem,
+   * mas habilitar não liga tela nenhuma. A interface mostra "Em breve" e não
+   * oferece interruptor.
+   */
+  available: boolean;
   sort: number;
 }
 
 export const MODULES: readonly ModuleDefinition[] = [
-  { key: 'core', name: 'Núcleo', dependsOn: [], alwaysOn: true, sort: 10 },
-  { key: 'scheduling', name: 'Agenda', dependsOn: ['core'], alwaysOn: false, sort: 20 },
-  { key: 'clinical', name: 'Atendimento e prontuário', dependsOn: ['core'], alwaysOn: false, sort: 30 },
-  { key: 'lab', name: 'Exames', dependsOn: ['clinical'], alwaysOn: false, sort: 40 },
-  { key: 'immunization', name: 'Vacinas e preventivos', dependsOn: ['clinical'], alwaysOn: false, sort: 50 },
-  { key: 'documents', name: 'Documentos', dependsOn: ['clinical'], alwaysOn: false, sort: 60 },
-  { key: 'comms', name: 'Comunicações', dependsOn: ['core'], alwaysOn: false, sort: 70 },
-  { key: 'inventory', name: 'Estoque', dependsOn: ['core'], alwaysOn: false, sort: 80 },
-  { key: 'reports', name: 'Relatórios', dependsOn: ['core'], alwaysOn: false, sort: 90 },
-  { key: 'billing', name: 'Financeiro', dependsOn: ['core'], alwaysOn: false, sort: 100 },
-  { key: 'inpatient', name: 'Internação', dependsOn: ['clinical'], alwaysOn: false, sort: 110 },
-  { key: 'surgery', name: 'Centro cirúrgico', dependsOn: ['clinical', 'scheduling'], alwaysOn: false, sort: 120 },
+  { key: 'core', name: 'Núcleo', dependsOn: [], alwaysOn: true, available: true, sort: 10 },
+  { key: 'scheduling', name: 'Agenda', dependsOn: ['core'], alwaysOn: false, available: true, sort: 20 },
+  { key: 'clinical', name: 'Atendimento e prontuário', dependsOn: ['core'], alwaysOn: false, available: true, sort: 30 },
+  { key: 'lab', name: 'Exames', dependsOn: ['clinical'], alwaysOn: false, available: true, sort: 40 },
+  { key: 'immunization', name: 'Vacinas e preventivos', dependsOn: ['clinical'], alwaysOn: false, available: true, sort: 50 },
+  { key: 'documents', name: 'Documentos', dependsOn: ['clinical'], alwaysOn: false, available: true, sort: 60 },
+  { key: 'comms', name: 'Comunicações', dependsOn: ['core'], alwaysOn: false, available: true, sort: 70 },
+  { key: 'inventory', name: 'Estoque', dependsOn: ['core'], alwaysOn: false, available: false, sort: 80 },
+  { key: 'reports', name: 'Relatórios', dependsOn: ['core'], alwaysOn: false, available: false, sort: 90 },
+  { key: 'billing', name: 'Financeiro', dependsOn: ['core'], alwaysOn: false, available: false, sort: 100 },
+  { key: 'inpatient', name: 'Internação', dependsOn: ['clinical'], alwaysOn: false, available: false, sort: 110 },
+  { key: 'surgery', name: 'Centro cirúrgico', dependsOn: ['clinical', 'scheduling'], alwaysOn: false, available: false, sort: 120 },
 ] as const;
 
 export const MODULE_BY_KEY: Record<ModuleKey, ModuleDefinition> = Object.fromEntries(
   MODULES.map((m) => [m.key, m]),
 ) as Record<ModuleKey, ModuleDefinition>;
+
+/**
+ * Módulos que têm rota de verdade na API, conferido por `@Authorize('<modulo>'`
+ * em `apps/api/src/modules`. Serve para a interface não oferecer interruptor
+ * para o que ainda não existe.
+ */
+export const IMPLEMENTED_MODULES: readonly ModuleKey[] = MODULES.filter((m) => m.available).map((m) => m.key);
 
 /** Verbos permitidos no sufixo de uma permissão (vocabulário fechado). */
 export const PERMISSION_VERBS = [
@@ -111,11 +124,17 @@ export interface PermissionDefinition {
   description: string;
 }
 
-function p(module: ModuleKey, key: string, description: string): PermissionDefinition {
+/**
+ * O parâmetro genérico preserva a chave como tipo literal. Sem isso `key`
+ * alarga para `string` e `PermissionKey` deixa de recusar chave inexistente.
+ */
+function p<K extends string>(module: ModuleKey, key: K, description: string): PermissionDefinition & { key: K } {
   return { key, module, description };
 }
 
-export const PERMISSIONS: readonly PermissionDefinition[] = [
+// Sem anotação de tipo de propósito: é da inferência com `as const` que sai o
+// union literal de `PermissionKey`.
+export const PERMISSIONS = [
   // ---------------------------------------------------------------- core
   p('core', 'tenant:read', 'Ver dados da organização'),
   p('core', 'tenant:update', 'Editar dados e configurações da organização'),
@@ -262,7 +281,13 @@ export const PERMISSIONS: readonly PermissionDefinition[] = [
   p('surgery', 'surgery:cancel', 'Cancelar cirurgia'),
 ] as const;
 
-export const PERMISSION_KEYS = PERMISSIONS.map((x) => x.key);
+export const PERMISSION_KEYS: readonly PermissionKey[] = PERMISSIONS.map((x) => x.key);
+
+/**
+ * Union literal das chaves do catálogo. Quem consome (`can()` no web, o guard
+ * na API) deve tipar por aqui: chave inventada vira erro de compilação, e não
+ * um botão que some em produção.
+ */
 export type PermissionKey = (typeof PERMISSIONS)[number]['key'];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDefinition> = Object.fromEntries(
@@ -281,7 +306,7 @@ export interface RoleTemplate {
   description: string;
   /** `true` quando o papel exige registro profissional válido para assinar. */
   clinical: boolean;
-  permissions: string[];
+  permissions: PermissionKey[];
   sort: number;
 }
 
@@ -542,7 +567,7 @@ export const LICENSE_REQUIRED_PERMISSIONS = [
   'prescription:controlled',
   'exam_result:sign',
   'surgery:sign',
-] as const;
+] as const satisfies readonly PermissionKey[];
 
 /** Operações que exigem reautenticação recente (step-up). */
 export const STEP_UP_PERMISSIONS = [
@@ -551,7 +576,7 @@ export const STEP_UP_PERMISSIONS = [
   'encounter:reopen',
   'guardian:anonymize',
   'tenant:manage_billing',
-] as const;
+] as const satisfies readonly PermissionKey[];
 
 /** Planos comerciais: template de entitlements. */
 export interface PlanDefinition {
@@ -562,43 +587,41 @@ export interface PlanDefinition {
   sort: number;
 }
 
+/*
+ * Limites e composição seguem a tabela comercial de docs/PLANO_DE_LANCAMENTO.md
+ * seção 7.3. Nenhum plano inclui inventory, reports, billing, inpatient nem
+ * surgery: esses módulos ainda não têm rota na API e voltam para os planos
+ * quando existirem.
+ */
 export const PLANS: readonly PlanDefinition[] = [
   {
     key: 'solo',
     name: 'Autônomo',
+    // O Essencial pago (até 3 usuários) usa esta mesma chave, com o limite
+    // sobrescrito por tenant, enquanto não houver chave própria no banco.
     modules: ['core', 'scheduling', 'clinical', 'immunization', 'documents', 'comms'],
-    limits: { maxFacilities: 1, maxUsers: 2, storageGb: 5 },
+    limits: { maxFacilities: 1, maxUsers: 1, storageGb: 5 },
     sort: 10,
   },
   {
     key: 'clinic',
     name: 'Clínica',
-    modules: [
-      'core',
-      'scheduling',
-      'clinical',
-      'lab',
-      'immunization',
-      'documents',
-      'comms',
-      'inventory',
-      'reports',
-      'billing',
-    ],
-    limits: { maxFacilities: 3, maxUsers: 15, storageGb: 50 },
+    modules: ['core', 'scheduling', 'clinical', 'lab', 'immunization', 'documents', 'comms'],
+    limits: { maxFacilities: 3, maxUsers: 10, storageGb: 50 },
     sort: 20,
   },
   {
     key: 'hospital',
     name: 'Hospital',
-    modules: [...MODULE_KEYS],
+    // Internação, cirurgia e financeiro entram aqui quando as rotas existirem.
+    modules: [...IMPLEMENTED_MODULES],
     limits: { maxFacilities: 5, maxUsers: 60, storageGb: 200 },
     sort: 30,
   },
   {
     key: 'enterprise',
     name: 'Rede',
-    modules: [...MODULE_KEYS],
+    modules: [...IMPLEMENTED_MODULES],
     limits: { maxFacilities: 100, maxUsers: 1000, storageGb: 2000 },
     sort: 40,
   },

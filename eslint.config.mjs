@@ -49,6 +49,20 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
   {
+    // Checagem com informação de tipo, ligada só onde importa: uma Promise
+    // esquecida sem await em condição é sempre verdadeira, e foi assim que uma
+    // guarda de storage deixou de guardar. O custo é lint mais lento.
+    files: ['apps/api/src/**/*.ts', 'apps/worker/src/**/*.ts'],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+    },
+  },
+  {
     files: ['apps/api/**/*.ts'],
     rules: {
       // A injeção de dependência do Nest lê os tipos do construtor em tempo de

@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Download, FileText, Upload } from 'lucide-react';
 import type { DocumentDto } from '@chiron/contracts';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, openSignedUrl } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import { Badge, Card, CardHeader, EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/ui/primitives';
@@ -45,8 +45,10 @@ function DocumentsView() {
 
   async function download(documentId: string) {
     try {
-      const result = await api.get<{ url: string }>(`/documents/${documentId}/download`);
-      window.open(result.url, '_blank', 'noopener');
+      await openSignedUrl(async () => {
+        const result = await api.get<{ url: string }>(`/documents/${documentId}/download`);
+        return result.url;
+      });
     } catch (caught) {
       toast.error(errorMessage(caught));
     }

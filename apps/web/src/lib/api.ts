@@ -168,6 +168,36 @@ export function knownErrorCode(value: string): value is ErrorCode {
   return (ERROR_CODES as readonly string[]).includes(value);
 }
 
+/**
+ * Abre um documento cuja URL assinada só existe depois de uma ida ao servidor.
+ *
+ * Safari e iPadOS só aceitam janela nova aberta no mesmo gesto do clique, então
+ * a aba nasce vazia aqui, ainda dentro do evento, e recebe o endereço quando ele
+ * chega. Chame sempre de forma síncrona no manipulador do clique.
+ */
+export async function openSignedUrl(resolveUrl: () => Promise<string>): Promise<void> {
+  const target = window.open('', '_blank');
+
+  let url: string;
+  try {
+    url = await resolveUrl();
+  } catch (error) {
+    // Falhou antes de ter endereço: a aba em branco não fica para trás.
+    target?.close();
+    throw error;
+  }
+
+  if (target && !target.closed) {
+    target.location.href = url;
+    // A aba do documento não precisa de referência de volta para esta.
+    target.opener = null;
+    return;
+  }
+
+  // Pop-up bloqueado mesmo assim: melhor abrir na própria aba do que não abrir.
+  window.location.href = url;
+}
+
 /** Mensagem pronta para exibir, sem vazar detalhe técnico ao usuário. */
 export function errorMessage(error: unknown, fallback = 'Não foi possível concluir a operação.'): string {
   if (error instanceof ApiError) {

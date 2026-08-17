@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
@@ -154,6 +155,12 @@ function LoginForm() {
       <Button type="submit" size="lg" block loading={submitting} className="mt-6">
         Entrar
       </Button>
+
+      <div className="mt-2 flex justify-center">
+        <Button asChild variant="link" size="sm">
+          <Link href="/esqueci-senha">Esqueci minha senha</Link>
+        </Button>
+      </div>
 
       <p className="mt-6 flex items-center justify-center gap-1.5 text-[12.5px] text-[var(--ink-3)]">
         <ShieldCheck className="h-3.5 w-3.5" />

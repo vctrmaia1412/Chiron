@@ -34,6 +34,9 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # ---------------------------------------------------------------- runtime
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
+# Fuso fixo: colunas DATE são serializadas com toISOString().slice(0,10) e o
+# dia muda se o contêiner rodar em outro fuso.
+ENV TZ=UTC
 WORKDIR /repo
 
 RUN apt-get update \
@@ -58,7 +61,8 @@ USER chiron
 WORKDIR /repo/apps/api
 EXPOSE 3333
 
+# /ready e não /health: o liveness responde 200 mesmo com o banco fora.
 HEALTHCHECK --interval=15s --timeout=4s --start-period=20s --retries=4 \
-  CMD curl -fsS http://127.0.0.1:3333/api/v1/health || exit 1
+  CMD curl -fsS http://127.0.0.1:3333/api/v1/ready || exit 1
 
 CMD ["node", "dist/main.js"]

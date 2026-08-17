@@ -15,7 +15,9 @@
 
   --ink: #10201f;
   --ink-2: #40514f;
-  --ink-3: #6b807d;
+  /* Espécie, tutor e horário nas listas saem neste tom: 5,26:1 no branco,
+     acima do mínimo de 4,5:1 exigido para texto pequeno. */
+  --ink-3: #5c706d;
   --ink-inverse: #ffffff;
 
   --brand: #0f766e;
@@ -194,10 +196,38 @@ select {
 }
 
 @media print {
-  .no-print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  /* No papel a folha já é a moldura: sombra e fundo de cartão só gastam tinta. */
+  :root {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #ffffff;
+    --surface-3: #ffffff;
+    --shadow-sm: 0 0 rgba(0, 0, 0, 0);
+    --shadow: 0 0 rgba(0, 0, 0, 0);
+    --shadow-lg: 0 0 rgba(0, 0, 0, 0);
+  }
+
+  /* Fora do conteúdo nada vai impresso: barra superior, menu lateral e barra
+     inferior se repetiriam em toda folha. O `header` da própria página fica,
+     por isso a exceção para o que está dentro de `main`. */
+  .no-print,
+  aside,
+  nav,
+  header:not(main header) {
     display: none !important;
   }
+
+  html,
   body {
     background: #fff;
+  }
+
+  main {
+    padding: 0 !important;
   }
 }

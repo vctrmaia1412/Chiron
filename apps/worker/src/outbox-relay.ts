@@ -44,11 +44,20 @@ export async function relayOnce(pool: Pool): Promise<{ processed: number; failed
     );
 
     for (const event of rows) {
+      // Um savepoint por evento: erro de SQL aborta a transação inteira, e sem
+      // desfazer até aqui o próprio UPDATE da tentativa falharia. O lote voltaria
+      // igual no ciclo seguinte, para sempre, sem nunca contar tentativa.
+      await client.query('SAVEPOINT evento');
       try {
         await handleEvent(client, event);
         await client.query(`UPDATE platform.domain_events SET published_at = now() WHERE id = $1`, [event.id]);
+        await client.query('RELEASE SAVEPOINT evento');
         processed += 1;
       } catch (error) {
+        // A trava de linha do SELECT foi tomada antes do savepoint, então
+        // continua valendo: nenhuma outra réplica pega o mesmo evento.
+        await client.query('ROLLBACK TO SAVEPOINT evento');
+        await client.query('RELEASE SAVEPOINT evento');
         failed += 1;
         const attempts = event.attempts + 1;
         const message = error instanceof Error ? error.message : String(error);

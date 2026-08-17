@@ -11,8 +11,22 @@ const DATE_TIME = new Intl.DateTimeFormat('pt-BR', {
 const WEEKDAY = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
 const MONEY = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
+/** Data sem hora: `new Date('2025-03-10')` seria meia-noite UTC e o Intl mostraria o dia anterior no Brasil. */
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
 function toDate(value: string | Date | null | undefined): Date | null {
   if (!value) return null;
+  const dateOnly = typeof value === 'string' ? DATE_ONLY.exec(value) : null;
+  if (dateOnly) {
+    const year = Number(dateOnly[1]);
+    const month = Number(dateOnly[2]);
+    const day = Number(dateOnly[3]);
+    const local = new Date(year, month - 1, day);
+    // Rejeita 31/02: o construtor local transborda para o mês seguinte em vez de falhar.
+    const valid =
+      local.getFullYear() === year && local.getMonth() === month - 1 && local.getDate() === day;
+    return valid ? local : null;
+  }
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }

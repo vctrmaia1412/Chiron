@@ -1,0 +1,130 @@
+name: CI
+
+# Plano gratuito do GitHub Actions em repositório privado: 2.000 minutos por
+# mês. Dois jobs só, cache do store do pnpm e cancelamento das execuções
+# antigas do mesmo branch mantêm o consumo dentro da cota.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Mesma versão de packageManager no package.json da raiz.
+  PNPM_VERSION: 10.34.5
+
+jobs:
+  quality:
+    name: Qualidade
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Ativar pnpm pelo corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      # api, web e worker importam @chiron/contracts e @chiron/domain pelos
+      # arquivos de dist. Sem este build, lint e typecheck falham por módulo
+      # não encontrado, e não por defeito do código.
+      - name: Compilar pacotes compartilhados
+        run: pnpm exec turbo run build --filter=@chiron/contracts --filter=@chiron/domain
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Verificação de tipos
+        run: pnpm typecheck
+
+      - name: Testes de unidade
+        run: pnpm test
+
+  integration:
+    name: Integração
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chiron_owner
+          POSTGRES_PASSWORD: chiron_dev_password
+          POSTGRES_DB: chiron
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chiron_owner -d chiron"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      APP_ENV: test
+      NODE_ENV: test
+      # A suíte recria o banco chiron_test a partir destas URLs (ela troca o
+      # nome do database e mantém papel, senha e host). O papel chiron_owner é
+      # o dono do serviço, único que pode criar e derrubar database.
+      DATABASE_MIGRATION_URL: postgres://chiron_owner:chiron_dev_password@localhost:5432/chiron
+      DATABASE_URL: postgres://chiron_app:chiron_dev_password@localhost:5432/chiron
+      DATABASE_IAM_URL: postgres://chiron_iam:chiron_dev_password@localhost:5432/chiron
+      DATABASE_ADMIN_URL: postgres://chiron_admin:chiron_dev_password@localhost:5432/chiron
+      # A migração 0005 aplica esta senha em chiron_app, chiron_iam e
+      # chiron_admin, então ela precisa bater com a das URLs acima.
+      DATABASE_ROLE_PASSWORD: chiron_dev_password
+      # Valores de teste, iguais aos padrões de test/setup/test-database.ts.
+      # Não abrem nada: o banco do job morre com o runner.
+      SESSION_SECRET: test-session-secret-com-mais-de-32-caracteres
+      COLUMN_ENCRYPTION_KEY: test-column-encryption-key-32-chars-min
+      COLUMN_HASH_KEY: test-column-hash-key-com-32-caracteres
+      # Erro da API visível no log do job sem afogar a saída do teste.
+      TEST_LOG_LEVEL: error
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Ativar pnpm pelo corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Compilar pacotes compartilhados
+        run: pnpm exec turbo run build --filter=@chiron/contracts --filter=@chiron/domain
+
+      - name: Testes de integração
+        run: pnpm test:integration
+
+      # A suíte deixa o chiron_test de pé com migração, dados de referência e
+      # seed aplicados. A guarda roda contra ele: confere família, política e
+      # FORCE ROW LEVEL SECURITY tabela a tabela e confirma que, sem contexto
+      # de tenant, o papel da aplicação lê zero linhas.
+      - name: Guarda de RLS
+        env:
+          DATABASE_MIGRATION_URL: postgres://chiron_owner:chiron_dev_password@localhost:5432/chiron_test
+          DATABASE_URL: postgres://chiron_app:chiron_dev_password@localhost:5432/chiron_test
+        run: pnpm --filter @chiron/api exec tsx src/database/verify-rls.ts

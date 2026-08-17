@@ -3,9 +3,12 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import fastifyCookie from '@fastify/cookie';
 import fastifyHelmet from '@fastify/helmet';
+import fastifyRateLimit from '@fastify/rate-limit';
+import type { FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { AppModule } from './app.module';
-import { env } from './config/env';
+import { env, isTest, type Env } from './config/env';
+import { AppError } from './common/errors';
 import { logger, NestPinoLogger } from './common/logger';
 
 export async function createApp(): Promise<NestFastifyApplication> {
@@ -28,6 +31,8 @@ export async function createApp(): Promise<NestFastifyApplication> {
     contentSecurityPolicy: false, // a CSP é aplicada pelo web/proxy
     crossOriginResourcePolicy: { policy: 'same-site' },
   });
+
+  await registerRateLimit(app, cfg);
 
   // A sessão viaja em cookie, então a origem permitida é explícita e curta:
   // nada de `*`, que o navegador recusa junto de credenciais de qualquer forma.
@@ -91,6 +96,56 @@ export async function createApp(): Promise<NestFastifyApplication> {
   app.enableShutdownHooks();
 
   return app;
+}
+
+/**
+ * Limite de taxa por IP. O armazenamento é em memória porque o cenário real é
+ * uma réplica única; com duas ou mais o limite passa a valer por réplica, o que
+ * ainda segura o abuso e é aceitável enquanto não houver contador compartilhado.
+ */
+async function registerRateLimit(app: NestFastifyApplication, cfg: Env): Promise<void> {
+  // Nos testes de integração todas as chamadas saem do mesmo IP e estourariam a
+  // cota ainda no preparo do cenário.
+  if (isTest()) return;
+
+  // O prefixo é comparado com a URL crua, então precisa do mesmo formato que o
+  // Fastify enxerga: uma barra na frente e nenhuma no fim.
+  const trimmedPrefix = cfg.API_PREFIX.replace(/^\/+|\/+$/g, '');
+  const prefix = trimmedPrefix === '' ? '' : `/${trimmedPrefix}`;
+  const routePath = (request: FastifyRequest): string => {
+    const path = request.url.split('?')[0] ?? request.url;
+    return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+  };
+
+  // Rotas públicas que rodam argon2id (19 MB de memória por tentativa) ou
+  // queimam token de uso único: cota bem menor que a do resto da API.
+  const authPaths = new Set(
+    ['auth/login', 'auth/password/forgot', 'auth/password/reset', 'auth/invitations/accept'].map(
+      (route) => `${prefix}/${route}`,
+    ),
+  );
+  const probePaths = new Set([`${prefix}/health`, `${prefix}/ready`]);
+
+  await app.register(fastifyRateLimit as never, {
+    global: true,
+    timeWindow: '1 minute',
+    max: (request: FastifyRequest) =>
+      authPaths.has(routePath(request)) ? cfg.RATE_LIMIT_LOGIN_PER_MIN : cfg.RATE_LIMIT_PUBLIC_PER_MIN,
+    // Contadores separados por classe de rota: usar a aplicação não pode gastar
+    // a cota de login, e tentar login não pode derrubar o resto da sessão.
+    keyGenerator: (request: FastifyRequest) =>
+      authPaths.has(routePath(request)) ? `auth:${request.ip}` : request.ip,
+    // Fora da cota: o preflight do navegador é barato e vem em dobro com a
+    // requisição real, e as sondas do orquestrador batem em intervalo curto.
+    allowList: (request: FastifyRequest) =>
+      request.method === 'OPTIONS' || probePaths.has(routePath(request)),
+    // O plugin LANÇA o que este construtor devolve, em vez de responder direto.
+    // Um objeto simples chegaria ao filtro do Nest como erro desconhecido e
+    // viraria 500; devolvendo AppError, o filtro reconhece e responde 429 no
+    // formato de erro do projeto, com o requestId do próprio ciclo.
+    errorResponseBuilder: () =>
+      new AppError('RATE_LIMITED', 'Muitas requisições em pouco tempo. Aguarde um minuto e tente novamente.'),
+  });
 }
 
 async function bootstrap(): Promise<void> {

@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Download, EyeOff, FileText, Printer } from 'lucide-react';
 import type { MedicalRecord, Patient } from '@chiron/contracts';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, openSignedUrl } from '@/lib/api';
 import { formatDate, formatDateTime, formatWeight } from '@/lib/format';
 import { DISPOSITION, ENCOUNTER_CLASS, ENCOUNTER_STATUS, labelFor, statusFor } from '@/lib/labels';
 import { useSession } from '@/lib/session';
@@ -35,14 +35,16 @@ export default function MedicalRecordPage({ params }: { params: Promise<{ id: st
   async function exportPdf() {
     setGenerating(true);
     try {
-      const generated = await api.post<{ documentId: string; title: string }>('/documents/generate', {
-        templateKey: 'medical_record',
-        targetType: 'patient',
-        targetId: id,
-        fields: {},
+      await openSignedUrl(async () => {
+        const generated = await api.post<{ documentId: string; title: string }>('/documents/generate', {
+          templateKey: 'medical_record',
+          targetType: 'patient',
+          targetId: id,
+          fields: {},
+        });
+        const download = await api.get<{ url: string }>(`/documents/${generated.documentId}/download`);
+        return download.url;
       });
-      const download = await api.get<{ url: string }>(`/documents/${generated.documentId}/download`);
-      window.open(download.url, '_blank', 'noopener');
       toast.success('Prontuário gerado e arquivado nos documentos do paciente.');
     } catch (caught) {
       toast.error(errorMessage(caught));

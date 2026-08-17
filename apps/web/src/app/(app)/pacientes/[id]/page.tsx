@@ -113,7 +113,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
                 </Link>
               </Button>
             )}
-            {can('record:read') && (
+            {can('record:read_sensitive') && (
               <Button asChild size="sm">
                 <Link href={`/pacientes/${patient.id}/prontuario`}>
                   <ScrollText className="h-4 w-4" />

@@ -16,10 +16,49 @@ import { AppError } from '../../common/errors';
 import type { ModuleState, RequestContext } from '../../common/request-context';
 import { uuidv7 } from '../../common/uuid';
 import { CryptoService } from '../../common/crypto.service';
+import { MailerService, passwordResetUrl } from '../../common/mailer.service';
+import { logger } from '../../common/logger';
 import { env } from '../../config/env';
 
 const MAX_FAILED_ATTEMPTS = 8;
 const LOCK_MINUTES = 15;
+
+interface InvitationRow {
+  id: string;
+  tenant_id: string;
+  email: string;
+  name: string | null;
+  role_id: string;
+  facility_ids: string[];
+  all_facilities: boolean;
+  professional: { council?: string; councilNumber?: string; councilState?: string; specialties?: string[] } | null;
+}
+
+/**
+ * Desfecho do aceite de convite. A verificação de senha acontece dentro da
+ * transação, mas a punição da tentativa errada precisa sobreviver a ela: por
+ * isso o caminho de falha volta como valor em vez de exceção.
+ */
+type AcceptOutcome =
+  | { kind: 'invalid_invitation' }
+  | { kind: 'password_required' }
+  | { kind: 'password_rejected' }
+  | { kind: 'password_failed'; userId: string; attempts: number; tenantId: string; invitationId: string }
+  | { kind: 'accepted'; invitation: InvitationRow; userId: string; existingAccount: boolean };
+
+/** Evento de autenticação para `audit.audit_log` (categoria `auth`). */
+interface AuthEvent {
+  action: string;
+  userId: string;
+  tenantId?: string | null;
+  membershipId?: string | null;
+  entityTable?: string;
+  entityId?: string;
+  after?: Record<string, unknown>;
+  requestId: string;
+  ip: string | null;
+  userAgent: string | null;
+}
 
 @Injectable()
 export class IdentityService {
@@ -28,6 +67,7 @@ export class IdentityService {
     private readonly sessions: SessionService,
     private readonly audit: AuditService,
     private readonly crypto: CryptoService,
+    private readonly mailer: MailerService,
   ) {}
 
   async login(
@@ -61,12 +101,16 @@ export class IdentityService {
 
     const ok = await this.sessions.verifyPassword(user.password_hash, input.password);
     if (!ok) {
-      const attempts = user.failed_login_attempts + 1;
-      const lockUntil = attempts >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null;
-      await this.db.iam.query(
-        `UPDATE iam.users SET failed_login_attempts = $2, locked_until = $3 WHERE id = $1`,
-        [user.id, attempts, lockUntil],
-      );
+      const failure = await this.registerFailedPassword(user.id, user.failed_login_attempts);
+      // Sem organização escolhida ainda: o evento vai sem tenant.
+      await this.recordAuthEvent({
+        action: 'login.failed',
+        userId: user.id,
+        after: failure,
+        requestId: meta.requestId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
       throw invalid;
     }
 
@@ -381,6 +425,15 @@ export class IdentityService {
 
   async logout(ctx: RequestContext): Promise<void> {
     await this.sessions.revoke(ctx.sessionId);
+    await this.recordAuthEvent({
+      action: 'logout',
+      userId: ctx.user.id,
+      tenantId: ctx.tenantId,
+      membershipId: ctx.membershipId,
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+    });
   }
 
   async listSessions(ctx: RequestContext) {
@@ -415,23 +468,73 @@ export class IdentityService {
       [sessionId, ctx.user.id],
     );
     if (!rowCount) throw AppError.notFound('Sessão');
+
+    await this.recordAuthEvent({
+      action: 'session.revoke',
+      userId: ctx.user.id,
+      tenantId: ctx.tenantId,
+      membershipId: ctx.membershipId,
+      after: { sessionId, current: sessionId === ctx.sessionId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+    });
   }
 
+  /**
+   * Reautenticação para ações sensíveis. Segue a mesma política do login:
+   * conta bloqueada não passa, erro conta tentativa e vira registro de
+   * auditoria. Sem isso o endpoint seria um oráculo de senha para quem já
+   * tem um cookie de sessão válido.
+   */
   async stepUp(ctx: RequestContext, password: string): Promise<void> {
-    const { rows } = await this.db.iam.query<{ password_hash: string | null }>(
-      `SELECT password_hash FROM iam.users WHERE id = $1`,
+    const { rows } = await this.db.iam.query<{
+      id: string;
+      password_hash: string | null;
+      status: string;
+      locked_until: Date | null;
+      failed_login_attempts: number;
+    }>(
+      `SELECT id, password_hash, status, locked_until, failed_login_attempts
+         FROM iam.users WHERE id = $1 AND deleted_at IS NULL`,
       [ctx.user.id],
     );
-    const hash = rows[0]?.password_hash;
-    if (!hash || !(await this.sessions.verifyPassword(hash, password))) {
-      throw new AppError('INVALID_CREDENTIALS', 'Senha incorreta.');
+
+    const user = rows[0];
+    const invalid = new AppError('INVALID_CREDENTIALS', 'Senha incorreta.');
+    if (!user || !user.password_hash) throw invalid;
+
+    if (user.locked_until && user.locked_until.getTime() > Date.now()) {
+      throw new AppError('ACCOUNT_LOCKED', 'Conta temporariamente bloqueada por tentativas de acesso.');
     }
+    if (user.status !== 'active') throw invalid;
+
+    const ok = await this.sessions.verifyPassword(user.password_hash, password);
+    if (!ok) {
+      const failure = await this.registerFailedPassword(user.id, user.failed_login_attempts);
+      await this.recordAuthEvent({
+        action: 'step_up.failed',
+        userId: user.id,
+        tenantId: ctx.tenantId,
+        membershipId: ctx.membershipId,
+        after: failure,
+        requestId: ctx.requestId,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      });
+      throw invalid;
+    }
+
+    await this.db.iam.query(
+      `UPDATE iam.users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
+      [user.id],
+    );
     await this.sessions.markStepUp(ctx.sessionId);
   }
 
   async requestPasswordReset(email: string): Promise<{ token: string | null }> {
-    const { rows } = await this.db.iam.query<{ id: string }>(
-      `SELECT id FROM iam.users WHERE email = $1 AND status = 'active' AND deleted_at IS NULL`,
+    const { rows } = await this.db.iam.query<{ id: string; name: string }>(
+      `SELECT id, name FROM iam.users WHERE email = $1 AND status = 'active' AND deleted_at IS NULL`,
       [email],
     );
     const user = rows[0];
@@ -443,12 +546,30 @@ export class IdentityService {
        VALUES ($1, $2, $3, now() + interval '30 minutes')`,
       [uuidv7(), user.id, this.crypto.tokenHash(token)],
     );
+
+    // A rota devolve a mesma resposta para e-mail cadastrado e não cadastrado.
+    // Deixar a falha de envio subir quebraria essa simetria: só quem tem conta
+    // receberia erro, e isso vira um oráculo de existência. O problema fica no
+    // log, com o id do usuário e sem endereço nenhum.
+    try {
+      await this.mailer.sendPasswordReset({
+        to: email,
+        recipientName: user.name,
+        url: passwordResetUrl(token),
+      });
+    } catch (error) {
+      logger.error({ err: error, userId: user.id }, 'Falha ao enviar o e-mail de redefinição de senha');
+    }
+
     return { token };
   }
 
-  async resetPassword(token: string, password: string): Promise<void> {
+  async resetPassword(
+    token: string,
+    password: string,
+    meta: { ip: string | null; userAgent: string | null; requestId: string },
+  ): Promise<void> {
     const hash = this.crypto.tokenHash(token);
-    const passwordHash = await this.sessions.hashPassword(password);
 
     const result = await this.db.withIam({ tenantId: null }, async (tx) => {
       const { rows } = await tx.query<{ id: string; user_id: string }>(
@@ -458,18 +579,35 @@ export class IdentityService {
       );
       const row = rows[0];
       if (!row) return null;
+
+      // O argon2id vem depois da conferência do token, não antes: quem chuta
+      // token em série receberia trabalho de CPU de graça em cada tentativa.
+      const passwordHash = await this.sessions.hashPassword(password);
+
       await tx.query(`UPDATE iam.password_reset_tokens SET used_at = now() WHERE id = $1`, [row.id]);
       await tx.query(
         `UPDATE iam.users SET password_hash = $2, failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
         [row.user_id, passwordHash],
       );
-      await tx.query(`UPDATE iam.sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, [
-        row.user_id,
-      ]);
-      return row;
+      const revoked = await tx.query(
+        `UPDATE iam.sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+        [row.user_id],
+      );
+      return { userId: row.user_id, sessionsRevoked: revoked.rowCount ?? 0 };
     });
 
     if (!result) throw AppError.validation('Link inválido ou expirado. Solicite um novo.');
+
+    // A troca de senha derruba todas as sessões: o número delas é o que a
+    // investigação precisa para reconstruir o que caiu junto.
+    await this.recordAuthEvent({
+      action: 'password.reset',
+      userId: result.userId,
+      after: { sessionsRevoked: result.sessionsRevoked },
+      requestId: meta.requestId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
   }
 
   async acceptInvitation(
@@ -479,19 +617,19 @@ export class IdentityService {
   ): Promise<{ token: string; expiresAt: Date; tenantId: string }> {
     const tokenHash = this.crypto.tokenHash(token);
 
-    const accepted = await this.db.withIam(
+    /**
+     * Mensagem única para senha ausente, senha errada e conta indisponível: o
+     * aceite não pode virar um oráculo que diz se o e-mail já tem conta.
+     */
+    const invalidPassword = new AppError(
+      'INVALID_CREDENTIALS',
+      'Informe a senha para concluir o convite. Se este e-mail já tem acesso, use a senha atual da conta.',
+    );
+
+    const outcome = await this.db.withIam<AcceptOutcome>(
       { tenantId: null, invitationTokenHash: tokenHash },
       async (tx: PoolClient) => {
-        const { rows } = await tx.query<{
-          id: string;
-          tenant_id: string;
-          email: string;
-          name: string | null;
-          role_id: string;
-          facility_ids: string[];
-          all_facilities: boolean;
-          professional: { council?: string; councilNumber?: string; councilState?: string; specialties?: string[] } | null;
-        }>(
+        const { rows } = await tx.query<InvitationRow>(
           `SELECT id, tenant_id, email, name, role_id, facility_ids, all_facilities, professional
              FROM iam.invitations
             WHERE token_hash = $1 AND accepted_at IS NULL AND expires_at > now()
@@ -499,16 +637,30 @@ export class IdentityService {
           [tokenHash],
         );
         const invitation = rows[0];
-        if (!invitation) return null;
+        if (!invitation) return { kind: 'invalid_invitation' };
 
-        const existing = await tx.query<{ id: string; password_hash: string | null }>(
-          `SELECT id, password_hash FROM iam.users WHERE email = $1`,
+        const existing = await tx.query<{
+          id: string;
+          password_hash: string | null;
+          status: string;
+          locked_until: Date | null;
+          failed_login_attempts: number;
+          deleted_at: Date | null;
+        }>(
+          `SELECT id, password_hash, status, locked_until, failed_login_attempts, deleted_at
+             FROM iam.users WHERE email = $1`,
           [invitation.email],
         );
+        const user = existing.rows[0];
 
-        let userId = existing.rows[0]?.id;
-        if (!userId) {
-          if (!payload.password) throw AppError.validation('Defina uma senha para concluir o convite.');
+        // A senha é exigida nos três casos (conta nova, conta sem senha e conta
+        // existente), para que a ausência dela não denuncie qual é o caso.
+        if (!payload.password) return { kind: 'password_required' };
+
+        let userId: string;
+        let existingAccount = false;
+
+        if (!user) {
           userId = uuidv7();
           await tx.query(
             `INSERT INTO iam.users (id, email, name, password_hash, status)
@@ -520,7 +672,31 @@ export class IdentityService {
               await this.sessions.hashPassword(payload.password),
             ],
           );
-        } else if (payload.password && !existing.rows[0]?.password_hash) {
+        } else if (user.password_hash) {
+          // Aceitar o convite de um e-mail que já tem conta é agir como aquela
+          // pessoa. A senha dela é conferida pelo mesmo caminho do login, com
+          // bloqueio e contagem de tentativas, antes de qualquer sessão.
+          if (user.deleted_at || user.status !== 'active') return { kind: 'password_rejected' };
+          if (user.locked_until && user.locked_until.getTime() > Date.now()) {
+            return { kind: 'password_rejected' };
+          }
+          const ok = await this.sessions.verifyPassword(user.password_hash, payload.password);
+          if (!ok) {
+            return {
+              kind: 'password_failed',
+              userId: user.id,
+              attempts: user.failed_login_attempts,
+              tenantId: invitation.tenant_id,
+              invitationId: invitation.id,
+            };
+          }
+          userId = user.id;
+          existingAccount = true;
+        } else {
+          // Conta sem senha (convite anterior não concluído): define agora.
+          if (user.deleted_at || user.status !== 'active') return { kind: 'password_rejected' };
+          userId = user.id;
+          existingAccount = true;
           await tx.query(`UPDATE iam.users SET password_hash = $2 WHERE id = $1`, [
             userId,
             await this.sessions.hashPassword(payload.password),
@@ -529,13 +705,29 @@ export class IdentityService {
 
         await tx.query(`UPDATE iam.invitations SET accepted_at = now() WHERE id = $1`, [invitation.id]);
 
-        return { invitation, userId };
+        return { kind: 'accepted', invitation, userId, existingAccount };
       },
     );
 
-    if (!accepted) throw AppError.validation('Convite inválido ou expirado.');
+    if (outcome.kind === 'invalid_invitation') throw AppError.validation('Convite inválido ou expirado.');
+    if (outcome.kind === 'password_required' || outcome.kind === 'password_rejected') throw invalidPassword;
+    if (outcome.kind === 'password_failed') {
+      const failure = await this.registerFailedPassword(outcome.userId, outcome.attempts);
+      await this.recordAuthEvent({
+        action: 'invitation.accept.failed',
+        userId: outcome.userId,
+        tenantId: outcome.tenantId,
+        entityTable: 'invitations',
+        entityId: outcome.invitationId,
+        after: failure,
+        requestId: meta.requestId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      throw invalidPassword;
+    }
 
-    const { invitation, userId } = accepted;
+    const { invitation, userId, existingAccount } = outcome;
 
     // Criação da membership dentro do contexto do tenant (RLS ativo).
     const membershipId = await this.db.withTenant(
@@ -609,6 +801,19 @@ export class IdentityService {
           invitation.tenant_id,
         ]);
 
+        await this.insertAuthEvent(tx, {
+          action: 'invitation.accept',
+          userId,
+          tenantId: invitation.tenant_id,
+          membershipId: finalId,
+          entityTable: 'invitations',
+          entityId: invitation.id,
+          after: { membershipId: finalId, existingAccount },
+          requestId: meta.requestId,
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+
         return finalId;
       },
     );
@@ -623,6 +828,77 @@ export class IdentityService {
     });
 
     return { token: session.token, expiresAt: session.expiresAt, tenantId: invitation.tenant_id };
+  }
+
+  /**
+   * Política única da tentativa de senha errada, usada pelo login, pelo
+   * step-up e pelo aceite de convite. Fora de transação de propósito: o
+   * chamador aborta em seguida e a contagem precisa sobreviver ao rollback.
+   */
+  private async registerFailedPassword(
+    userId: string,
+    currentAttempts: number,
+  ): Promise<{ attempts: number; locked: boolean }> {
+    const attempts = currentAttempts + 1;
+    const lockUntil = attempts >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null;
+    await this.db.iam.query(`UPDATE iam.users SET failed_login_attempts = $2, locked_until = $3 WHERE id = $1`, [
+      userId,
+      attempts,
+      lockUntil,
+    ]);
+    return { attempts, locked: lockUntil !== null };
+  }
+
+  /** Grava o evento na transação em curso. `after` nunca leva dado pessoal. */
+  private async insertAuthEvent(tx: PoolClient, event: AuthEvent): Promise<void> {
+    await tx.query(
+      `INSERT INTO audit.audit_log
+         (id, tenant_id, actor_user_id, actor_membership_id, actor_type, category, action,
+          entity_schema, entity_table, entity_id, after, request_id, ip, user_agent)
+       VALUES ($1,$2,$3,$4,'user','auth',$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        uuidv7(),
+        event.tenantId ?? null,
+        event.userId,
+        event.membershipId ?? null,
+        event.action,
+        event.entityTable ? 'iam' : null,
+        event.entityTable ?? null,
+        event.entityId ?? null,
+        event.after ? JSON.stringify(event.after) : null,
+        event.requestId,
+        event.ip,
+        event.userAgent,
+      ],
+    );
+  }
+
+  /**
+   * Evento de autenticação avulso. Sem organização escolhida a linha vai sem
+   * tenant, e nesse caso a política de `audit.audit_log` só aceita a escrita
+   * pelo papel administrativo (migração 0003). Falhar ao auditar não muda a
+   * resposta da rota: o registro do problema é o que resta.
+   */
+  private async recordAuthEvent(event: AuthEvent): Promise<void> {
+    try {
+      if (event.tenantId) {
+        await this.db.withTenant(
+          {
+            tenantId: event.tenantId,
+            userId: event.userId,
+            membershipId: event.membershipId ?? null,
+            requestId: event.requestId,
+            ip: event.ip,
+            userAgent: event.userAgent,
+          },
+          (tx) => this.insertAuthEvent(tx, event),
+        );
+      } else {
+        await this.db.withAdmin((tx) => this.insertAuthEvent(tx, event));
+      }
+    } catch (error) {
+      logger.warn({ err: error, action: event.action }, 'Não foi possível registrar o evento de autenticação');
+    }
   }
 
   cookieOptions(expiresAt: Date) {

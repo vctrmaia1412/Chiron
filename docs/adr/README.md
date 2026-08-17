@@ -18,3 +18,5 @@ puder ser revertida em uma tarde, ela não precisa de ADR.
 | [0008](0008-outbox-transacional.md) | Eventos por outbox transacional |
 | [0009](0009-cifra-de-coluna-e-indice-cego.md) | CPF cifrado em coluna com índice cego |
 | [0010](0010-faixas-de-referencia-nao-validadas.md) | Faixa de referência começa informativa |
+| [0011](0011-papeis-do-sistema-globais.md) | Papéis do sistema são catálogo global |
+| [0012](0012-convite-nao-emite-sessao-de-conta-existente.md) | Convite não emite sessão de conta existente sem a senha dela |

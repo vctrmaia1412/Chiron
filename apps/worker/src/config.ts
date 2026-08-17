@@ -49,4 +49,11 @@ if (!parsed.success) {
 }
 
 export const config = parsed.data;
+
+/**
+ * Sem DATABASE_ADMIN_URL o worker cai no papel da aplicação, que não tem
+ * BYPASSRLS e por isso não enxerga a outbox. O boot confere e derruba o
+ * processo; aqui só fica o sinal, porque `logger` importa este módulo.
+ */
+export const adminConnectionIsFallback = config.DATABASE_ADMIN_URL === undefined;
 export const adminConnectionString = config.DATABASE_ADMIN_URL ?? config.DATABASE_URL;

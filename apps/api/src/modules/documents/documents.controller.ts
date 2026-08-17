@@ -23,6 +23,7 @@ function ctxOf(req: AuthedRequest) {
 export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
+  /** Documentos de conteúdo clínico só saem para quem tem `record:read_sensitive`. */
   @Get()
   @Authorize('documents', 'document:read')
   list(
@@ -47,7 +48,7 @@ export class DocumentsController {
     return this.documents.createUpload(ctxOf(req), body);
   }
 
-  /** Passo 2: confere o conteúdo enviado (magic bytes) e ativa o documento. */
+  /** Passo 2: confere tamanho e conteúdo enviado (magic bytes) e ativa o documento. */
   @Post(':id/complete')
   @Authorize('documents', 'document:create')
   completeUpload(
@@ -59,6 +60,7 @@ export class DocumentsController {
     return this.documents.completeUpload(ctxOf(req), id);
   }
 
+  /** A URL assinada de documento clínico exige `record:read_sensitive`, conferido no serviço. */
   @Get(':id/download')
   @Authorize('documents', 'document:read')
   download(@Req() req: AuthedRequest, @Param('id') id: string) {

@@ -26,6 +26,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
+# Fuso fixo: datas geradas pelos jobs precisam bater com as da API.
+ENV TZ=UTC
 WORKDIR /repo
 
 RUN apt-get update \
@@ -49,7 +51,8 @@ USER chiron
 WORKDIR /repo/apps/worker
 EXPOSE 3334
 
+# /ready e não /health: só o readiness enxerga relay parado e outbox acumulada.
 HEALTHCHECK --interval=20s --timeout=4s --start-period=20s --retries=4 \
-  CMD curl -fsS http://127.0.0.1:3334/health || exit 1
+  CMD curl -fsS http://127.0.0.1:3334/ready || exit 1
 
 CMD ["node", "dist/main.js"]

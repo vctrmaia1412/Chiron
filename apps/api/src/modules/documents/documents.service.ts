@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import type { CreateUpload, DocumentDto, GenerateDocument } from '@chiron/contracts';
+import { MAX_UPLOAD_BYTES, type CreateUpload, type DocumentDto, type GenerateDocument } from '@chiron/contracts';
 import { DatabaseService } from '../../database/database.service';
 import { AuditService } from '../../common/audit.service';
 import { AppError } from '../../common/errors';
+import { logger } from '../../common/logger';
 import { uuidv7 } from '../../common/uuid';
 import type { RequestContext } from '../../common/request-context';
 import { contextToTenantContext } from '../../common/request-context';
@@ -18,6 +19,30 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   'image/webp': 'webp',
 };
 
+/**
+ * Documentos que carregam conteúdo clínico: prontuário, receita, laudo,
+ * resultado de exame, imagem e atestados que descrevem estado de saúde.
+ * Sem isso a recepção baixaria em PDF exatamente o que a redação de
+ * `record:read_sensitive` esconde na tela do prontuário.
+ * Os demais tipos (consentimento, comparecimento, vacinação, foto, fatura)
+ * são documentos de balcão e seguem em `document:read`.
+ */
+const SENSITIVE_DOCUMENT_KINDS = [
+  'prescription',
+  'report',
+  'exam_result',
+  'imaging',
+  'medical_record',
+  'certificate',
+  'health_certificate',
+  'death_certificate',
+  'referral_letter',
+] as const;
+
+function isSensitiveKind(kind: string): boolean {
+  return (SENSITIVE_DOCUMENT_KINDS as readonly string[]).includes(kind);
+}
+
 @Injectable()
 export class DocumentsService {
   constructor(
@@ -28,6 +53,13 @@ export class DocumentsService {
   ) {}
 
   async list(ctx: RequestContext, params: { patientId?: string; encounterId?: string; kind?: string; limit: number }) {
+    const canReadSensitive = ctx.permissions.has('record:read_sensitive');
+    // Pedir explicitamente um tipo clínico é tentativa de acesso, não filtro vazio.
+    if (!canReadSensitive && params.kind && isSensitiveKind(params.kind)) {
+      await this.recordSensitiveDenial(ctx, 'document.list', null, params.kind);
+      throw AppError.forbidden('Seu perfil não permite ver documentos com conteúdo clínico.');
+    }
+
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       const { rows } = await tx.query<{
         id: string;
@@ -59,9 +91,18 @@ export class DocumentsService {
                    WHERE l2.document_id = d.id AND l2.tenant_id = d.tenant_id
                      AND l2.target_type = 'encounter' AND l2.target_id = $3))
             AND ($4::text IS NULL OR d.kind = $4)
+            AND ($6::boolean IS TRUE OR d.kind <> ALL($7::text[]))
           ORDER BY d.created_at DESC
           LIMIT $5`,
-        [ctx.tenantId, params.patientId ?? null, params.encounterId ?? null, params.kind ?? null, params.limit],
+        [
+          ctx.tenantId,
+          params.patientId ?? null,
+          params.encounterId ?? null,
+          params.kind ?? null,
+          params.limit,
+          canReadSensitive,
+          SENSITIVE_DOCUMENT_KINDS,
+        ],
       );
 
       const items: DocumentDto[] = rows.map((r) => ({
@@ -83,7 +124,7 @@ export class DocumentsService {
 
   /** Passo 1 do upload: registra o documento e devolve URL assinada. */
   async createUpload(ctx: RequestContext, input: CreateUpload) {
-    if (!this.storage.isAvailable()) {
+    if (!(await this.storage.isAvailable())) {
       throw new AppError('INTERNAL_ERROR', 'Armazenamento de arquivos indisponível no momento.');
     }
 
@@ -129,29 +170,41 @@ export class DocumentsService {
     };
   }
 
-  /** Passo 2: valida magic bytes e marca o documento como ativo. */
+  /** Passo 2: valida tamanho e magic bytes e marca o documento como ativo. */
   async completeUpload(ctx: RequestContext, documentId: string) {
-    return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
-      const { rows } = await tx.query<{ storage_key: string; mime_type: string; status: string }>(
-        `SELECT storage_key, mime_type, status FROM documents.documents
+    // A união é anotada porque, inferida, o ramo de sucesso ganharia
+    // `storageKey?: undefined` e o `in` deixaria de estreitar o tipo.
+    type Outcome = { ok: true } | { invalid: 'size' | 'mime'; storageKey: string };
+
+    const outcome: Outcome = await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const { rows } = await tx.query<{
+        storage_key: string;
+        mime_type: string;
+        status: string;
+        size_bytes: string;
+      }>(
+        `SELECT storage_key, mime_type, status, size_bytes::text FROM documents.documents
           WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
         [documentId, ctx.tenantId],
       );
       const doc = rows[0];
       if (!doc) throw AppError.notFound('Documento');
-      if (doc.status === 'active') return { ok: true };
+      if (doc.status === 'active') return { ok: true } as const;
+
+      // O tamanho vem do HEAD, antes de ler: um objeto de vários GB carregado
+      // em memória derruba a API inteira.
+      const objectSize = await this.storage.head(doc.storage_key);
+      if (objectSize === null) throw AppError.validation('Arquivo não encontrado no armazenamento. Refaça o envio.');
+      if (objectSize > MAX_UPLOAD_BYTES || objectSize !== Number(doc.size_bytes)) {
+        return { invalid: 'size', storageKey: doc.storage_key } as const;
+      }
 
       const buffer = await this.storage.get(doc.storage_key);
       if (!buffer) throw AppError.validation('Arquivo não encontrado no armazenamento. Refaça o envio.');
 
       const detected = StorageService.detectMime(buffer);
       if (!detected || detected !== doc.mime_type) {
-        await this.storage.remove(doc.storage_key);
-        await tx.query(`UPDATE documents.documents SET status = 'entered_in_error' WHERE id = $1 AND tenant_id = $2`, [
-          documentId,
-          ctx.tenantId,
-        ]);
-        throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'O conteúdo do arquivo não corresponde ao tipo informado.');
+        return { invalid: 'mime', storageKey: doc.storage_key } as const;
       }
 
       const sha256 = createHash('sha256').update(buffer).digest('hex');
@@ -172,21 +225,51 @@ export class DocumentsService {
         after: { sizeBytes: buffer.length },
       });
 
-      return { ok: true };
+      return { ok: true } as const;
     });
+
+    if ('invalid' in outcome) {
+      // Fora da transação de leitura: o erro devolvido desfaria a marcação.
+      await this.invalidateUpload(ctx, documentId, outcome.storageKey);
+      throw outcome.invalid === 'size'
+        ? new AppError('PAYLOAD_TOO_LARGE', 'O arquivo enviado não confere com o tamanho informado.')
+        : new AppError('UNSUPPORTED_MEDIA_TYPE', 'O conteúdo do arquivo não corresponde ao tipo informado.');
+    }
+
+    return outcome;
+  }
+
+  /** Arquivo recusado: marca o registro e descarta o objeto do armazenamento. */
+  private async invalidateUpload(ctx: RequestContext, documentId: string, storageKey: string): Promise<void> {
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      await tx.query(`UPDATE documents.documents SET status = 'entered_in_error' WHERE id = $1 AND tenant_id = $2`, [
+        documentId,
+        ctx.tenantId,
+      ]);
+    });
+    try {
+      await this.storage.remove(storageKey);
+    } catch (error) {
+      logger.warn({ err: error, documentId }, 'Não foi possível remover do armazenamento o arquivo recusado');
+    }
   }
 
   async downloadUrl(ctx: RequestContext, documentId: string) {
-    return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+    // Mesma anotação do completeUpload: sem ela o ramo de sucesso ganha
+    // `denied?: undefined` e o `in` não estreita.
+    type Outcome = { url: string; expiresInSeconds: number } | { denied: string };
+
+    const outcome: Outcome = await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       const { rows } = await tx.query<{
         storage_key: string;
+        kind: string;
         title: string;
         mime_type: string;
         status: string;
         virus_scan_status: string;
         patient_id: string | null;
       }>(
-        `SELECT d.storage_key, d.title, d.mime_type, d.status, d.virus_scan_status,
+        `SELECT d.storage_key, d.kind, d.title, d.mime_type, d.status, d.virus_scan_status,
                 (SELECT dl.target_id FROM documents.document_links dl
                   WHERE dl.document_id = d.id AND dl.tenant_id = d.tenant_id AND dl.target_type = 'patient'
                   LIMIT 1) AS patient_id
@@ -201,6 +284,11 @@ export class DocumentsService {
         throw AppError.forbidden('Arquivo bloqueado pela verificação de segurança.');
       }
 
+      // O PDF do prontuário é o próprio prontuário: mesma regra da tela.
+      if (isSensitiveKind(doc.kind) && !ctx.permissions.has('record:read_sensitive')) {
+        return { denied: doc.kind } as const;
+      }
+
       const extension = EXTENSION_BY_MIME[doc.mime_type] ?? 'bin';
       const url = await this.storage.presignDownload(doc.storage_key, `${doc.title}.${extension}`);
 
@@ -212,6 +300,41 @@ export class DocumentsService {
 
       return { url, expiresInSeconds: 300 };
     });
+
+    if ('denied' in outcome) {
+      await this.recordSensitiveDenial(ctx, 'document.download', documentId, outcome.denied);
+      throw AppError.forbidden('Este documento tem conteúdo clínico e seu perfil não permite o acesso.');
+    }
+
+    return outcome;
+  }
+
+  /**
+   * Negativa por conteúdo clínico também vira registro de auditoria, como no
+   * guard: é justamente a tentativa que interessa em uma investigação.
+   * A falha ao auditar não muda a resposta, apenas registra o problema.
+   */
+  private async recordSensitiveDenial(
+    ctx: RequestContext,
+    action: string,
+    documentId: string | null,
+    kind: string,
+  ): Promise<void> {
+    try {
+      await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+        await this.audit.record(tx, ctx, {
+          category: 'access_denied',
+          action,
+          entitySchema: 'documents',
+          entityTable: 'documents',
+          entityId: documentId,
+          reason: 'missing_permission',
+          after: { permission: 'record:read_sensitive', kind },
+        });
+      });
+    } catch (error) {
+      logger.warn({ err: error, requestId: ctx.requestId }, 'Não foi possível auditar a negativa de acesso');
+    }
   }
 
   /** Grava um PDF gerado pelo próprio sistema (receita, atestado, carteira). */
@@ -234,9 +357,12 @@ export class DocumentsService {
     const key = this.storage.buildKey(ctx.tenantId as string, input.kind, documentId, extension);
     const sha256 = createHash('sha256').update(input.buffer).digest('hex');
 
-    if (this.storage.isAvailable()) {
-      await this.storage.put(key, input.buffer, input.mimeType);
+    // Registro 'active' sem arquivo gravado só aparece no download, muito depois
+    // da receita assinada. Falhar aqui derruba a transação inteira.
+    if (!(await this.storage.isAvailable())) {
+      throw new AppError('INTERNAL_ERROR', 'Armazenamento de arquivos indisponível: o documento não foi gerado.');
     }
+    await this.storage.put(key, input.buffer, input.mimeType);
 
     await tx.query(
       `INSERT INTO documents.documents

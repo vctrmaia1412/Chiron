@@ -59,8 +59,15 @@ export class IdentityController {
 
   @Post('auth/password/reset')
   @Public()
-  async resetPassword(@Body(zBody(resetPasswordRequestSchema)) body: { token: string; password: string }) {
-    await this.identity.resetPassword(body.token, body.password);
+  async resetPassword(
+    @Body(zBody(resetPasswordRequestSchema)) body: { token: string; password: string },
+    @Req() req: AuthedRequest,
+  ) {
+    await this.identity.resetPassword(body.token, body.password, {
+      ip: req.ip ?? null,
+      userAgent: (req.headers['user-agent'] as string) ?? null,
+      requestId: req.requestId,
+    });
     return { ok: true };
   }
 

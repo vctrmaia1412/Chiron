@@ -121,7 +121,9 @@ export async function checkFailClosed(): Promise<SchemaGuardProblem[]> {
 }
 
 if (require.main === module) {
-  (async () => {
+  // `void`: a função já trata o próprio erro e chama process.exit, então não há
+  // rejeição para propagar. O marcador existe para a regra de promessa solta.
+  void (async () => {
     const guard = await checkSchemaGuard();
     const failClosed = await checkFailClosed();
     const all = [...guard, ...failClosed];

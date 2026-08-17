@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from 'pg';
 import { env } from '../config/env';
 import { logger } from '../common/logger';
 
@@ -16,6 +16,21 @@ export interface TenantContext {
 
 export type Executor = {
   query<T extends QueryResultRow = QueryResultRow>(text: string, params?: unknown[]): Promise<{ rows: T[]; rowCount: number }>;
+};
+
+/**
+ * Limites de tempo comuns aos três pools. Sem eles, um banco pausado deixa a
+ * requisição pendurada para sempre em vez de devolver erro:
+ *   connectionTimeoutMillis  desiste de abrir conexão
+ *   statement_timeout        o servidor corta a consulta
+ *   query_timeout            o cliente corta quando o servidor nem responde
+ */
+const POOL_TIMEOUTS: PoolConfig = {
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
+  statement_timeout: 15000,
+  query_timeout: 20000,
+  keepAlive: true,
 };
 
 /**
@@ -36,14 +51,25 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     const cfg = env();
-    this.appPool = new Pool({ connectionString: cfg.DATABASE_URL, max: cfg.DATABASE_POOL_MAX });
+    // `application_name` distinto por pool: identifica o papel nas estatísticas
+    // do provedor (pg_stat_activity) quando algo trava em produção.
+    this.appPool = new Pool({
+      connectionString: cfg.DATABASE_URL,
+      max: cfg.DATABASE_POOL_MAX,
+      application_name: 'chiron-api-app',
+      ...POOL_TIMEOUTS,
+    });
     this.iamPool = new Pool({
       connectionString: cfg.DATABASE_IAM_URL ?? cfg.DATABASE_URL,
       max: Math.max(2, Math.floor(cfg.DATABASE_POOL_MAX / 2)),
+      application_name: 'chiron-api-iam',
+      ...POOL_TIMEOUTS,
     });
     this.adminPool = new Pool({
       connectionString: cfg.DATABASE_ADMIN_URL ?? cfg.DATABASE_URL,
       max: 4,
+      application_name: 'chiron-api-admin',
+      ...POOL_TIMEOUTS,
     });
     for (const [name, pool] of [
       ['app', this.appPool],

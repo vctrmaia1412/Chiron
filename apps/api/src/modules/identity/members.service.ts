@@ -3,10 +3,14 @@ import type { InviteMemberRequest, Member } from '@chiron/contracts';
 import { DatabaseService } from '../../database/database.service';
 import { AuditService } from '../../common/audit.service';
 import { CryptoService } from '../../common/crypto.service';
+import { MailerService, invitationUrl } from '../../common/mailer.service';
 import { AppError } from '../../common/errors';
 import { uuidv7 } from '../../common/uuid';
 import type { RequestContext } from '../../common/request-context';
 import { contextToTenantContext } from '../../common/request-context';
+
+/** Papel que dá acesso total: só o próprio proprietário pode concedê-lo. */
+const OWNER_ROLE_KEY = 'owner';
 
 @Injectable()
 export class MembersService {
@@ -14,6 +18,7 @@ export class MembersService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly crypto: CryptoService,
+    private readonly mailer: MailerService,
   ) {}
 
   async list(ctx: RequestContext): Promise<Member[]> {
@@ -78,7 +83,13 @@ export class MembersService {
   }
 
   async invite(ctx: RequestContext, input: InviteMemberRequest): Promise<{ id: string; token: string }> {
-    return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+    // Sem esta barreira, quem tem member:invite convida uma segunda conta como
+    // proprietário e ganha acesso total à organização.
+    if (input.roleKey === OWNER_ROLE_KEY && !ctx.isOwner) {
+      throw AppError.forbidden('Somente o proprietário pode conceder o papel de proprietário.');
+    }
+
+    const created = await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       const role = await tx.query<{ id: string }>(
         `SELECT id FROM iam.roles WHERE key = $1 AND (tenant_id = $2 OR tenant_id IS NULL) ORDER BY tenant_id NULLS LAST LIMIT 1`,
         [input.roleKey, ctx.tenantId],
@@ -92,6 +103,12 @@ export class MembersService {
         [ctx.tenantId, input.email],
       );
       if ((existing.rowCount ?? 0) > 0) throw AppError.conflict('Este e-mail já faz parte da organização.');
+
+      // O nome da organização vai no e-mail: quem recebe precisa saber quem
+      // está convidando antes de digitar uma senha.
+      const tenant = await tx.query<{ name: string }>(`SELECT name FROM platform.tenants WHERE id = $1`, [
+        ctx.tenantId,
+      ]);
 
       const token = this.crypto.randomToken();
       const id = uuidv7();
@@ -126,8 +143,20 @@ export class MembersService {
         after: { roleKey: input.roleKey },
       });
 
-      return { id, token };
+      return { id, token, organizationName: tenant.rows[0]?.name ?? 'sua organização' };
     });
+
+    // Fora da transação de propósito: a chamada HTTP ao provedor não pode
+    // segurar a conexão do banco. Se o envio falhar, o erro sobe: o convite
+    // existe mas ninguém recebeu o link, e reenviar regrava o token.
+    await this.mailer.sendInvitation({
+      to: input.email,
+      recipientName: input.name ?? null,
+      organizationName: created.organizationName,
+      url: invitationUrl(created.token),
+    });
+
+    return { id: created.id, token: created.token };
   }
 
   async update(
@@ -142,6 +171,17 @@ export class MembersService {
       );
       const membership = target.rows[0];
       if (!membership) throw AppError.notFound('Membro');
+
+      // Titularidade só se mexe pelas mãos do titular: nem promover outra conta
+      // a proprietário, nem rebaixar ou suspender quem já é.
+      if (!ctx.isOwner) {
+        if (input.roleKey === OWNER_ROLE_KEY) {
+          throw AppError.forbidden('Somente o proprietário pode conceder o papel de proprietário.');
+        }
+        if (membership.is_owner && (input.roleKey !== undefined || input.status !== undefined)) {
+          throw AppError.forbidden('Somente o proprietário pode alterar o papel ou a situação do proprietário.');
+        }
+      }
 
       if (membership.is_owner && input.status && input.status !== 'active') {
         const owners = await tx.query<{ count: string }>(

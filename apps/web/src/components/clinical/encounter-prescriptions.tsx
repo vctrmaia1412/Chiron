@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Download, FileSignature, Pill, Plus, XCircle } from 'lucide-react';
 import type { Prescription } from '@chiron/contracts';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, openSignedUrl } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { Card, CardHeader, EmptyState, ListSkeleton } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
@@ -62,8 +62,10 @@ export function EncounterPrescriptions({
 
   async function download(documentId: string) {
     try {
-      const result = await api.get<{ url: string }>(`/documents/${documentId}/download`);
-      window.open(result.url, '_blank', 'noopener');
+      await openSignedUrl(async () => {
+        const result = await api.get<{ url: string }>(`/documents/${documentId}/download`);
+        return result.url;
+      });
     } catch (error) {
       toast.error(errorMessage(error));
     }

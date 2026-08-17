@@ -21,9 +21,9 @@
     "infra:logs": "docker compose -f infra/compose/docker-compose.dev.yml logs -f",
     "infra:nuke": "docker compose -f infra/compose/docker-compose.dev.yml down -v",
     "test:all": "pnpm test && pnpm test:integration",
-    "stack:up": "docker compose -f infra/compose/docker-compose.yml --env-file .env up -d --build",
-    "stack:down": "docker compose -f infra/compose/docker-compose.yml --env-file .env down",
-    "stack:logs": "docker compose -f infra/compose/docker-compose.yml --env-file .env logs -f"
+    "stack:up": "docker compose -f infra/compose/docker-compose.yml --env-file .env.stack up -d --build",
+    "stack:down": "docker compose -f infra/compose/docker-compose.yml --env-file .env.stack down",
+    "stack:logs": "docker compose -f infra/compose/docker-compose.yml --env-file .env.stack logs -f"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { Pool } from 'pg';
-import { adminConnectionString, config } from './config';
+import { adminConnectionIsFallback, adminConnectionString, config } from './config';
 import { logger } from './logger';
 import { countPending, relayOnce } from './outbox-relay';
 import { SCHEDULED_JOBS, runJob } from './jobs';
@@ -14,8 +14,20 @@ import { SCHEDULED_JOBS, runJob } from './jobs';
  * organizações. Nenhuma requisição de usuário passa por este processo.
  */
 async function main(): Promise<void> {
-  const pool = new Pool({ connectionString: adminConnectionString, max: 4 });
+  const pool = new Pool({
+    connectionString: adminConnectionString,
+    max: 4,
+    application_name: 'chiron-worker',
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
+    // Limite maior que o da API porque os jobs varrem tabelas inteiras.
+    statement_timeout: 60000,
+    query_timeout: 70000,
+    keepAlive: true,
+  });
   pool.on('error', (error) => logger.error({ err: error }, 'Erro inesperado no pool do worker'));
+
+  await assertAdminRole(pool);
 
   let running = true;
   let lastRelayAt = 0;
@@ -89,6 +101,33 @@ async function main(): Promise<void> {
       await sleep(config.WORKER_POLL_MS * 3);
     }
   }
+}
+
+/**
+ * O relay lê platform.domain_events, que tem RLS forçada. Com um papel sem
+ * BYPASSRLS o SELECT devolve zero linhas: o log diz "lote processado", o
+ * /ready mostra zero pendentes e nenhuma notificação sai. Melhor não subir.
+ */
+async function assertAdminRole(pool: Pool): Promise<void> {
+  const { rows } = await pool.query<{ role_name: string; rolbypassrls: boolean }>(
+    `SELECT current_user::text AS role_name, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+  );
+  const role = rows[0];
+  const roleName = role?.role_name ?? 'desconhecido';
+
+  logger.info(
+    { role: roleName, bypassRls: role?.rolbypassrls === true, adminUrlFallback: adminConnectionIsFallback },
+    'Papel efetivo do worker no banco',
+  );
+
+  if (role?.rolbypassrls === true) return;
+
+  logger.fatal(
+    { role: roleName },
+    'Papel sem BYPASSRLS: o relay leria zero eventos da outbox sem acusar erro. Aponte DATABASE_ADMIN_URL para o papel administrativo.',
+  );
+  await pool.end().catch(() => undefined);
+  process.exit(1);
 }
 
 function sleep(ms: number): Promise<void> {

@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { Activity, AlertTriangle, CheckCircle2, Pause, Play, RotateCcw, ScrollText } from 'lucide-react';
 import type { EncounterDetail, Patient } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
-import { formatDateTime, formatWeight, relativeTime } from '@/lib/format';
+import { formatDate, formatDateTime, formatWeight, relativeTime } from '@/lib/format';
 import { DISPOSITION, ENCOUNTER_CLASS, ENCOUNTER_STATUS, labelFor, statusFor } from '@/lib/labels';
 import { useSession } from '@/lib/session';
 import { Badge, Card, CardHeader, ErrorState, PageHeader, Skeleton } from '@/components/ui/primitives';
@@ -134,7 +134,7 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
                 Iniciar atendimento
               </Button>
             )}
-            {writable && ['in_progress', 'on_hold'].includes(encounter.status) && can('encounter:finish') && (
+            {writable && ['in_progress', 'on_hold'].includes(encounter.status) && can('encounter:sign') && (
               <Button size="sm" onClick={() => setFinishOpen(true)}>
                 <CheckCircle2 className="h-4 w-4" />
                 Finalizar
@@ -245,7 +245,7 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
                   activeNotes.map((note) => (
                     <div key={note.id} className="space-y-1">
                       <NoteBlock note={note} />
-                      {note.status === 'final' && can('note:amend') && (
+                      {note.status === 'final' && can('encounter:amend') && (
                         <button
                           type="button"
                           onClick={() => setAmendTarget(note.id)}
@@ -326,7 +326,13 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
                 />
                 <Row
                   label="Retorno"
-                  value={encounter.followUpDueAt ? `${encounter.followUpDueAt} · ${encounter.followUpReason ?? ''}` : null}
+                  value={
+                    encounter.followUpDueAt
+                      ? `${formatDate(encounter.followUpDueAt)}${
+                          encounter.followUpReason ? ` · ${encounter.followUpReason}` : ''
+                        }`
+                      : null
+                  }
                 />
               </dl>
             </Card>

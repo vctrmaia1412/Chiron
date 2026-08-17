@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, openSignedUrl } from '@/lib/api';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
@@ -101,14 +101,23 @@ function GenerateDocumentSheetContent({
       const download = await api.get<{ url: string }>(`/documents/${generated.documentId}/download`);
       return download.url;
     },
-    onSuccess: async (url) => {
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['documents'] });
-      window.open(url, '_blank', 'noopener');
       toast.success('Documento gerado e arquivado.');
       onOpenChange(false);
     },
     onError: (error) => toast.error(errorMessage(error)),
   });
+
+  // A aba do PDF precisa nascer no próprio clique: se esperássemos a geração no
+  // servidor para só então abrir, o Safari trataria como pop-up e bloquearia.
+  async function generate() {
+    try {
+      await openSignedUrl(() => mutation.mutateAsync());
+    } catch {
+      // A falha já virou aviso em onError.
+    }
+  }
 
   return (
     <Sheet
@@ -122,7 +131,7 @@ function GenerateDocumentSheetContent({
           <Button variant="secondary" onClick={() => onOpenChange(false)} className="sm:w-auto">
             Cancelar
           </Button>
-          <Button onClick={() => mutation.mutate()} loading={mutation.isPending} className="sm:w-auto">
+          <Button onClick={() => void generate()} loading={mutation.isPending} className="sm:w-auto">
             Gerar PDF
           </Button>
         </>

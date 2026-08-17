@@ -8,11 +8,20 @@ name: chiron
 #
 # Nenhuma senha aparece aqui: todas vêm do .env, que não entra no versionamento.
 
+# Log com rotação em todos os serviços: sem isso o json-file cresce sem limite
+# e enche o disco de uma VM pequena. Teto de 50 MB por contêiner.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: chiron-db
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: chiron_owner
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
@@ -33,6 +42,7 @@ services:
     image: redis:7-alpine
     container_name: chiron-cache
     restart: unless-stopped
+    logging: *default-logging
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -47,6 +57,7 @@ services:
     image: minio/minio:latest
     container_name: chiron-storage
     restart: unless-stopped
+    logging: *default-logging
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:?defina S3_ACCESS_KEY no .env}
@@ -66,6 +77,7 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: chiron-migrate
     restart: "no"
+    logging: *default-logging
     environment:
       NODE_ENV: production
       APP_ENV: ${APP_ENV:-homolog}
@@ -87,6 +99,10 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: chiron-api
     restart: unless-stopped
+    logging: *default-logging
+    # Teto conservador para VM pequena: se estourar, o contêiner morre e
+    # reinicia em vez de derrubar a máquina inteira por falta de memória.
+    mem_limit: 256m
     environment:
       NODE_ENV: production
       APP_ENV: ${APP_ENV:-homolog}
@@ -123,6 +139,8 @@ services:
       dockerfile: apps/worker/Dockerfile
     container_name: chiron-worker
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 128m
     environment:
       NODE_ENV: production
       APP_ENV: ${APP_ENV:-homolog}
@@ -145,6 +163,8 @@ services:
         NEXT_PUBLIC_API_URL: /api/v1
     container_name: chiron-web
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 256m
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -157,6 +177,7 @@ services:
     image: caddy:2-alpine
     container_name: chiron-proxy
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "${PROXY_PORT:-8080}:8080"
     volumes:

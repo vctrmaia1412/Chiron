@@ -5,7 +5,7 @@ import { Authorize, RequireStepUp } from '../../auth/authorize.decorator';
 import { zBody } from '../../common/zod-validation.pipe';
 import { AppError } from '../../common/errors';
 import { env } from '../../config/env';
-import { logger } from '../../common/logger';
+import { invitationUrl } from '../../common/mailer.service';
 import type { AuthedRequest } from '../../common/request-context';
 
 function ctxOf(req: AuthedRequest) {
@@ -27,11 +27,16 @@ export class MembersController {
   @Authorize('core', 'member:invite')
   async invite(@Req() req: AuthedRequest, @Body(zBody(inviteMemberRequestSchema)) body: InviteMemberRequest) {
     const result = await this.members.invite(ctxOf(req), body);
-    const inviteUrl = `${env().PUBLIC_APP_URL}/convite/${result.token}`;
-    if (env().APP_ENV !== 'prod') {
-      logger.info({ inviteUrl }, 'Convite gerado');
-    }
-    return { id: result.id, inviteUrl };
+
+    // Quem convida não pode receber o token: com ele abriria o convite de outra
+    // pessoa e passaria a agir sob a identidade dela. O link vai por e-mail para
+    // `body.email` no envio feito pelo serviço; aqui é o único ponto em que o
+    // token cru existe, porque o banco guarda apenas o hash. Em dev e test ele
+    // volta na resposta para o fluxo poder ser percorrido sem provedor.
+    const appEnv = env().APP_ENV;
+    const exposeLink = appEnv === 'dev' || appEnv === 'test';
+
+    return { id: result.id, inviteUrl: exposeLink ? invitationUrl(result.token) : undefined };
   }
 
   @Patch('members/:id')

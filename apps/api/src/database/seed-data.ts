@@ -1,9 +1,9 @@
 import { Client } from 'pg';
 import { hash as argonHash } from '@node-rs/argon2';
-import { PLANS, ROLE_TEMPLATES } from '@chiron/contracts';
 import { env } from '../config/env';
 import { CryptoService } from '../common/crypto.service';
 import { uuidv7 } from '../common/uuid';
+import { provisionTenant } from '../modules/tenant/provisioning.service';
 
 /**
  * Seed de demonstração. Cria dados claramente identificados como demo
@@ -543,10 +543,6 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
 
     await client.query('BEGIN');
 
-    const planRow = await client.query<{ id: string }>(`SELECT id FROM platform.plans WHERE key = 'hospital'`);
-    const planId = planRow.rows[0]?.id;
-    if (!planId) throw new Error('Plano "hospital" não encontrado. Rode a migração antes do seed.');
-
     const speciesRows = await client.query<{ id: string; code: string }>(
       `SELECT id, code FROM registry.species WHERE tenant_id IS NULL`,
     );
@@ -559,29 +555,49 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
     const breedsByKey = new Map(breedRows.rows.map((r) => [breedKey(r.species_id, r.name), r.id]));
 
     // ------------------------------------------------------------ tenant
-    const tenantId = uuidv7();
-    await client.query(
-      `INSERT INTO platform.tenants (id, slug, name, status, plan_id, timezone, locale, settings)
-       VALUES ($1,'demo','Clínica Veterinária Aurora','active',$2,'America/Sao_Paulo','pt-BR',$3)`,
-      [
-        tenantId,
-        planId,
-        JSON.stringify({
+    // A organização, a unidade padrão, o proprietário e a membership dele saem
+    // do mesmo provisionamento usado para colocar uma clínica no ar. Se o seed
+    // repetisse a lógica, as duas divergiriam com o tempo.
+    const ownerSeed = DEMO_USERS.find((u) => u.isOwner);
+    if (!ownerSeed) throw new Error('Nenhum usuário de demonstração marcado como proprietário.');
+
+    const demoAddress = {
+      street: 'Rua das Acácias',
+      number: '1420',
+      district: 'Pinheiros',
+      city: 'São Paulo',
+      state: 'SP',
+      zip: '05432-000',
+    };
+
+    const demo = await provisionTenant(
+      client,
+      {
+        slug: 'demo',
+        name: 'Clínica Veterinária Aurora',
+        planKey: 'hospital',
+        status: 'active',
+        timezone: 'America/Sao_Paulo',
+        locale: 'pt-BR',
+        settings: {
           prescriptionHeader: 'Rua das Acácias, 1420 - Pinheiros, São Paulo/SP - (11) 3555-8800 - CRMV-SP 12345',
           finishRequiresOwnEncounter: false,
           demo: true,
-        }),
-      ],
+        },
+        facility: {
+          name: 'Unidade Pinheiros',
+          code: 'PIN',
+          address: demoAddress,
+          phone: '(11) 3555-8800',
+        },
+        // Com a senha pronta o provisionamento não gera convite: o acesso de
+        // demonstração precisa funcionar assim que o seed termina.
+        owner: { email: ownerSeed.email, name: ownerSeed.name, passwordHash },
+      },
+      crypto,
     );
-
-    const planModules = PLANS.find((p) => p.key === 'hospital')?.modules ?? [];
-    for (const moduleKey of planModules) {
-      await client.query(
-        `INSERT INTO platform.tenant_entitlements (tenant_id, module_key, state, source)
-         VALUES ($1,$2,'active','plan')`,
-        [tenantId, moduleKey],
-      );
-    }
+    const tenantId = demo.tenantId;
+    const facilityMain = demo.facilityId;
 
     const legalEntityId = uuidv7();
     await client.query(
@@ -595,50 +611,51 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
         crypto.encrypt('19131243000197'),
         crypto.blindIndex('19131243000197'),
         crypto.mask('19131243000197'),
-        JSON.stringify({ street: 'Rua das Acácias', number: '1420', district: 'Pinheiros', city: 'São Paulo', state: 'SP', zip: '05432-000' }),
+        JSON.stringify(demoAddress),
       ],
     );
 
-    const facilityMain = uuidv7();
+    // A unidade padrão nasce no provisionamento, ainda sem pessoa jurídica: o
+    // seed completa o vínculo e acrescenta a segunda unidade.
+    await client.query(`UPDATE platform.facilities SET legal_entity_id = $1 WHERE tenant_id = $2 AND id = $3`, [
+      legalEntityId,
+      tenantId,
+      facilityMain,
+    ]);
+
     const facilityUnit = uuidv7();
     await client.query(
       `INSERT INTO platform.facilities (id, tenant_id, legal_entity_id, name, code, kind, address, phone, timezone, is_default)
-       VALUES ($1,$2,$3,'Unidade Pinheiros','PIN','clinic',$4,'(11) 3555-8800','America/Sao_Paulo',true),
-              ($5,$2,$3,'Unidade Santana','SAN','clinic',$6,'(11) 3555-8811','America/Sao_Paulo',false)`,
+       VALUES ($1,$2,$3,'Unidade Santana','SAN','clinic',$4,'(11) 3555-8811','America/Sao_Paulo',false)`,
       [
-        facilityMain,
+        facilityUnit,
         tenantId,
         legalEntityId,
-        JSON.stringify({ street: 'Rua das Acácias', number: '1420', district: 'Pinheiros', city: 'São Paulo', state: 'SP', zip: '05432-000' }),
-        facilityUnit,
         JSON.stringify({ street: 'Avenida Braz Leme', number: '980', district: 'Santana', city: 'São Paulo', state: 'SP', zip: '02511-000' }),
       ],
     );
 
     // ------------------------------------------------------------- papéis
-    const roleIds = new Map<string, string>();
-    for (const template of ROLE_TEMPLATES) {
-      const roleId = uuidv7();
-      await client.query(
-        `INSERT INTO iam.roles (id, tenant_id, key, name, description, template_key, template_version, is_system, requires_license, sort)
-         VALUES ($1,$2,$3,$4,$5,$3,1,true,$6,$7)`,
-        [roleId, tenantId, template.key, template.name, template.description, template.clinical, template.sort],
-      );
-      roleIds.set(template.key, roleId);
-
-      for (const permission of template.permissions) {
-        await client.query(
-          `INSERT INTO iam.role_permissions (role_id, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [roleId, permission],
-        );
-      }
+    // Os papéis do sistema são globais (tenant_id nulo), sincronizados por
+    // reference-data. Copiá-los por tenant faria a mesma chave aparecer duas
+    // vezes na lista de papéis, já que a consulta soma global e do tenant.
+    const roleRows = await client.query<{ id: string; key: string }>(
+      `SELECT id, key FROM iam.roles WHERE tenant_id IS NULL`,
+    );
+    const roleIds = new Map(roleRows.rows.map((r) => [r.key, r.id]));
+    const ownerRoleId = roleIds.get('owner');
+    if (!ownerRoleId) {
+      throw new Error('Papéis do sistema não encontrados. Rode a sincronização de dados de referência antes do seed.');
     }
 
     // ----------------------------------------------------- usuários e time
     const userIds = new Map<string, string>();
+    userIds.set(ownerSeed.key, demo.ownerUserId);
     const professionalIds = new Map<string, string>();
 
     for (const seedUser of DEMO_USERS) {
+      // O proprietário já veio do provisionamento, com conta e membership.
+      if (seedUser.isOwner) continue;
       const userId = uuidv7();
       await client.query(
         `INSERT INTO iam.users (id, email, password_hash, name, status, is_platform_staff)
@@ -1644,63 +1661,23 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
     }
 
     // ------------------------------------------- segundo tenant (isolamento)
-    const betaTenantId = uuidv7();
-    const betaPlan = await client.query<{ id: string }>(`SELECT id FROM platform.plans WHERE key = 'solo'`);
-    await client.query(
-      `INSERT INTO platform.tenants (id, slug, name, status, plan_id, settings)
-       VALUES ($1,'beta','Pet Clinic Beta','active',$2,$3)`,
-      [betaTenantId, betaPlan.rows[0]?.id ?? planId, JSON.stringify({ demo: true })],
+    // Mesmo caminho do tenant demo: um plano menor, para que a diferença de
+    // entitlements entre organizações também apareça na demonstração.
+    const beta = await provisionTenant(
+      client,
+      {
+        slug: 'beta',
+        name: 'Pet Clinic Beta',
+        planKey: 'solo',
+        status: 'active',
+        settings: { demo: true },
+        facility: { name: 'Unidade Central', code: 'CEN' },
+        owner: { email: 'beta@chiron.dev', name: 'Sofia Andrade', passwordHash },
+      },
+      crypto,
     );
-    for (const moduleKey of PLANS.find((p) => p.key === 'solo')?.modules ?? []) {
-      await client.query(
-        `INSERT INTO platform.tenant_entitlements (tenant_id, module_key, state, source)
-         VALUES ($1,$2,'active','plan')`,
-        [betaTenantId, moduleKey],
-      );
-    }
-
-    const betaFacility = uuidv7();
-    await client.query(
-      `INSERT INTO platform.facilities (id, tenant_id, name, code, kind, is_default)
-       VALUES ($1,$2,'Unidade Central','CEN','clinic',true)`,
-      [betaFacility, betaTenantId],
-    );
-
-    const betaRoleId = uuidv7();
-    const ownerTemplate = ROLE_TEMPLATES.find((r) => r.key === 'owner');
-    await client.query(
-      `INSERT INTO iam.roles (id, tenant_id, key, name, description, template_key, is_system, sort)
-       VALUES ($1,$2,'owner','Proprietário','Acesso total.','owner',true,10)`,
-      [betaRoleId, betaTenantId],
-    );
-    for (const permission of ownerTemplate?.permissions ?? []) {
-      await client.query(
-        `INSERT INTO iam.role_permissions (role_id, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-        [betaRoleId, permission],
-      );
-    }
-
-    const betaUserId = uuidv7();
-    await client.query(
-      `INSERT INTO iam.users (id, email, password_hash, name, status)
-       VALUES ($1,'beta@chiron.dev',$2,'Sofia Andrade','active')
-       ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash`,
-      [betaUserId, passwordHash],
-    );
-    const betaUser = await client.query<{ id: string }>(`SELECT id FROM iam.users WHERE email = 'beta@chiron.dev'`);
-    const betaFinalUserId = betaUser.rows[0]?.id ?? betaUserId;
-
-    const betaMembershipId = uuidv7();
-    await client.query(
-      `INSERT INTO iam.memberships (id, tenant_id, user_id, status, is_owner, all_facilities, default_facility_id)
-       VALUES ($1,$2,$3,'active',true,true,$4)`,
-      [betaMembershipId, betaTenantId, betaFinalUserId, betaFacility],
-    );
-    await client.query(`INSERT INTO iam.membership_roles (membership_id, role_id, tenant_id) VALUES ($1,$2,$3)`, [
-      betaMembershipId,
-      betaRoleId,
-      betaTenantId,
-    ]);
+    const betaTenantId = beta.tenantId;
+    const betaFacility = beta.facilityId;
 
     const betaGuardianId = uuidv7();
     await client.query(
@@ -1737,7 +1714,7 @@ export async function seedDemoData(options: SeedOptions = {}): Promise<SeedResul
     );
     await client.query(`INSERT INTO iam.membership_roles (membership_id, role_id, tenant_id) VALUES ($1,$2,$3)`, [
       crossMembershipId,
-      betaRoleId,
+      ownerRoleId,
       betaTenantId,
     ]);
 

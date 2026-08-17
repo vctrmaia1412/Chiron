@@ -1,5 +1,5 @@
 import { Client } from 'pg';
-import { MODULES, PERMISSIONS, PLANS } from '@chiron/contracts';
+import { MODULES, PERMISSIONS, PLANS, ROLE_TEMPLATES } from '@chiron/contracts';
 import { OBSERVATION_CODES } from '@chiron/domain';
 import { env } from '../config/env';
 import { SPECIES_CATALOG } from './reference/species';
@@ -43,6 +43,41 @@ export async function syncReferenceData(connectionString?: string): Promise<void
       `DELETE FROM iam.permissions WHERE key <> ALL($1::text[])`,
       [PERMISSIONS.map((p) => p.key)],
     );
+
+    // Papéis do sistema como catálogo global (tenant_id nulo). Sem eles, uma
+    // organização criada fora do seed nasce sem papel algum: a lista de papéis
+    // volta vazia e o convite falha com "Papel desconhecido". A RLS de
+    // iam.roles é da família catálogo híbrido e já enxerga o que é global.
+    for (const template of ROLE_TEMPLATES) {
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO iam.roles
+           (tenant_id, key, name, description, template_key, template_version, is_system, requires_license, sort)
+         VALUES (NULL,$1,$2,$3,$1,1,true,$4,$5)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET name = EXCLUDED.name, description = EXCLUDED.description,
+               template_key = EXCLUDED.template_key, template_version = EXCLUDED.template_version,
+               is_system = EXCLUDED.is_system, requires_license = EXCLUDED.requires_license,
+               sort = EXCLUDED.sort
+         RETURNING id`,
+        [template.key, template.name, template.description, template.clinical, template.sort],
+      );
+      const roleId = rows[0]?.id;
+      if (!roleId) continue;
+
+      // Permissão que saiu do template precisa sair do papel: manter o que
+      // sobrou daria acesso que o contrato já removeu.
+      await client.query(
+        `DELETE FROM iam.role_permissions WHERE role_id = $1 AND permission_key <> ALL($2::text[])`,
+        [roleId, template.permissions],
+      );
+      for (const permission of template.permissions) {
+        await client.query(
+          `INSERT INTO iam.role_permissions (role_id, permission_key) VALUES ($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [roleId, permission],
+        );
+      }
+    }
 
     for (const plan of PLANS) {
       const { rows } = await client.query<{ id: string }>(

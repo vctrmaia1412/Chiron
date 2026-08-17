@@ -32,6 +32,23 @@ export type LoginResponse = z.infer<typeof loginResponseSchema>;
 export const moduleStateSchema = z.enum(['active', 'trial', 'suspended', 'disabled']);
 export type ModuleState = z.infer<typeof moduleStateSchema>;
 
+/**
+ * Item de `GET /entitlements`, exatamente como a API devolve hoje. A chave do
+ * módulo vem em `key`, não em `moduleKey`: ler o campo errado é o que fazia a
+ * tela de Configurações mostrar módulo sem nome.
+ */
+export const entitlementSchema = z.object({
+  key: z.enum(MODULE_KEYS),
+  name: z.string(),
+  dependsOn: z.array(z.enum(MODULE_KEYS)),
+  alwaysOn: z.boolean(),
+  state: moduleStateSchema,
+  source: z.string().nullable(),
+  expiresAt: isoDateTimeSchema.nullable(),
+  graceUntil: isoDateTimeSchema.nullable(),
+});
+export type Entitlement = z.infer<typeof entitlementSchema>;
+
 export const meContextSchema = z.object({
   user: z.object({
     id: uuidSchema,
@@ -157,3 +174,19 @@ export const updateMemberRequestSchema = z.object({
   allFacilities: z.boolean().optional(),
   facilityIds: z.array(uuidSchema).optional(),
 });
+
+/**
+ * Item de `GET /roles`. A tela de Papéis precisa do `id` para editar, de
+ * `requiresLicense` para exigir CRMV no convite e só do total de permissões,
+ * não da lista inteira.
+ */
+export const roleSummarySchema = z.object({
+  id: uuidSchema,
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  requiresLicense: z.boolean(),
+  isSystem: z.boolean(),
+  permissionCount: z.number().int().nonnegative(),
+});
+export type RoleSummary = z.infer<typeof roleSummarySchema>;
