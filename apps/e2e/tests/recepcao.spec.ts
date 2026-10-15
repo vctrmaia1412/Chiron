@@ -124,9 +124,9 @@ test('check-in com peso abre o atendimento com o motivo como queixa', async ({ p
   await page.locator('li', { hasText: animal }).first().getByRole('link', { name: 'Abrir atendimento' }).click();
   await page.waitForURL(/\/atendimentos\/[0-9a-f-]{36}$/);
   await settle(page);
-  await expect(page.getByText(animal).first()).toBeVisible();
+  await expect(page.getByText(animal).locator('visible=true').first()).toBeVisible();
   // a recepção não escreve o registro clínico; a queixa aparece no atendimento
-  await expect(page.getByText('Coceira na orelha').first()).toBeVisible();
+  await expect(page.getByText('Coceira na orelha').locator('visible=true').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 

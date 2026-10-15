@@ -490,6 +490,24 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
                   onFirstEdit={handleFirstEdit}
                   flushRef={flushNotes}
                 />
+              ) : encounter.redacted ? (
+                // Recepção vê o motivo que o tutor contou, não o conteúdo clínico:
+                // "nenhuma nota" seria mentira, as notas só não são dela.
+                <div className="space-y-2">
+                  {encounter.chiefComplaint && (
+                    <div>
+                      <p className="text-[12px] font-semibold uppercase tracking-wider text-[var(--ink-3)]">
+                        Motivo da consulta
+                      </p>
+                      <p className="mt-0.5 whitespace-pre-wrap text-[14.5px] text-[var(--ink)]">
+                        {encounter.chiefComplaint}
+                      </p>
+                    </div>
+                  )}
+                  <p className="text-[13px] text-[var(--ink-3)]">
+                    O registro clínico fica visível apenas para quem atende.
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   {activeNotes.length === 0 ? (
