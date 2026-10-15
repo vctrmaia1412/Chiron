@@ -43,6 +43,12 @@ services:
     # latest. Mesmas variáveis e mesmo formato de dados. Conferido em
     # 15/10/2026 (RELEASE.2026-09-22T19-25-18Z).
     image: cgr.dev/chainguard/minio:latest
+    # A imagem da Chainguard roda como o usuário 65532, mas volume nomeado novo
+    # nasce do root: numa VM recém-criada o MinIO morria com "Unable to
+    # initialize backend: file access denied". Como root ele se comporta como a
+    # minio/minio antiga, e um volume que já veio dela continua legível.
+    # Conferido em 15/10/2026 com volume novo: sobe, e `mc ready local` passa.
+    user: "0:0"
     ports:
       - "127.0.0.1:9000:9000"
 
