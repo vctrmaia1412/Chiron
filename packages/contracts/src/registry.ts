@@ -378,7 +378,11 @@ export const createServiceSchema = z.object({
   active: z.boolean().default(true),
 });
 
-export const updateServiceSchema = createServiceSchema.partial().omit({ key: true });
+export const updateServiceSchema = createServiceSchema
+  .partial()
+  .omit({ key: true })
+  // nulo apaga o preço; ausente mantém o que está
+  .extend({ defaultPrice: moneySchema.nullable().optional() });
 
 // ----------------------------------------------------------------- busca
 export const searchResultSchema = z.object({

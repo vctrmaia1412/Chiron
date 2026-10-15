@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, CheckCircle2, MoreHorizontal, Play, ScrollText } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, MoreHorizontal, Play, ScrollText, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 export interface BarAction {
@@ -25,7 +25,7 @@ export function EncounterActionBar({
 }: {
   actions: BarAction[];
   onMore?: () => void;
-  primary?: { label: string; kind: 'start' | 'finish'; onClick: () => void; loading?: boolean };
+  primary?: { label: string; kind: 'start' | 'finish' | 'assume'; onClick: () => void; loading?: boolean };
   patientId: string;
 }) {
   const writable = actions.length > 0;
@@ -101,7 +101,13 @@ export function EncounterActionBar({
               'bg-[var(--brand)] active:bg-[var(--brand-hover)]',
             )}
           >
-            {primary.kind === 'start' ? <Play className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+            {primary.kind === 'start' ? (
+              <Play className="h-4 w-4" />
+            ) : primary.kind === 'assume' ? (
+              <UserCheck className="h-4 w-4" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
             {primary.label}
           </button>
         )}

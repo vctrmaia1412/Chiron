@@ -280,14 +280,23 @@ export class AppointmentsService {
 
   async update(ctx: RequestContext, id: string, input: Record<string, unknown>): Promise<Appointment> {
     await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
-      const current = await tx.query<{ status: string; row_version: number; facility_id: string }>(
-        `SELECT status, row_version, facility_id FROM scheduling.appointments
+      const current = await tx.query<{
+        status: string;
+        row_version: number;
+        facility_id: string;
+        service_id: string;
+        professional_id: string | null;
+        start_at: Date;
+        end_at: Date;
+      }>(
+        `SELECT status, row_version, facility_id, service_id, professional_id, start_at, end_at
+           FROM scheduling.appointments
           WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
         [id, ctx.tenantId],
       );
       const appointment = current.rows[0];
       if (!appointment) throw AppError.notFound('Agendamento');
-      if (['completed', 'cancelled', 'rescheduled'].includes(appointment.status)) {
+      if (['completed', 'cancelled', 'rescheduled', 'no_show'].includes(appointment.status)) {
         throw AppError.conflict('Este agendamento não pode mais ser alterado.');
       }
       if (input.expectedVersion !== undefined && input.expectedVersion !== appointment.row_version) {
@@ -296,32 +305,76 @@ export class AppointmentsService {
         });
       }
 
+      const moving = input.startAt !== undefined || input.serviceId !== undefined || input.professionalId !== undefined;
+      if (moving && !['scheduled', 'confirmed'].includes(appointment.status)) {
+        throw AppError.conflict('O paciente já chegou: não dá para mudar horário, serviço ou profissional.');
+      }
+
+      // Remarcar recalcula o fim: mantém a duração quando só o horário muda e
+      // usa a duração padrão quando o serviço muda.
+      const serviceId = (input.serviceId as string | undefined) ?? appointment.service_id;
+      const service = await tx.query<{ default_duration_min: number; requires_professional: boolean }>(
+        `SELECT default_duration_min, requires_professional FROM registry.service_catalog
+          WHERE id = $1 AND tenant_id = $2 AND (active OR id = $3)`,
+        [serviceId, ctx.tenantId, appointment.service_id],
+      );
+      const svc = service.rows[0];
+      if (!svc) throw AppError.validation('Serviço inválido.');
+      const professionalId =
+        input.professionalId === undefined ? appointment.professional_id : (input.professionalId as string | null);
+      if (svc.requires_professional && !professionalId) {
+        throw AppError.validation('Selecione o profissional para este serviço.');
+      }
+
+      const startAt = input.startAt ? new Date(input.startAt as string) : appointment.start_at;
+      const durationMs =
+        input.serviceId !== undefined && input.serviceId !== appointment.service_id
+          ? svc.default_duration_min * 60_000
+          : appointment.end_at.getTime() - appointment.start_at.getTime();
+      const endAt = input.endAt ? new Date(input.endAt as string) : new Date(startAt.getTime() + durationMs);
+      if (endAt <= startAt) throw AppError.validation('O horário final deve ser depois do inicial.');
+
+      if (moving) {
+        const blocked = await tx.query<{ id: string }>(
+          `SELECT id FROM scheduling.schedule_blocks
+            WHERE tenant_id = $1 AND facility_id = $2
+              AND ($3::uuid IS NULL OR professional_id IS NULL OR professional_id = $3)
+              AND tstzrange(start_at, end_at, '[)') && tstzrange($4, $5, '[)')
+            LIMIT 1`,
+          [ctx.tenantId, appointment.facility_id, professionalId, startAt, endAt],
+        );
+        if (blocked.rowCount) throw AppError.conflict('Existe um bloqueio de agenda nesse horário.');
+      }
+
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(input, key);
       await tx.query(
         `UPDATE scheduling.appointments
-            SET professional_id = COALESCE($3, professional_id),
-                service_id = COALESCE($4, service_id),
-                start_at = COALESCE($5, start_at),
-                end_at = COALESCE($6, end_at),
-                priority = COALESCE($7, priority),
-                reason = COALESCE($8, reason),
-                notes = COALESCE($9, notes),
-                patient_id = COALESCE($10, patient_id),
-                allow_overlap = COALESCE($11, allow_overlap),
+            SET professional_id = $3,
+                service_id = $4,
+                start_at = $5,
+                end_at = $6,
+                allow_overlap = CASE WHEN $7::boolean IS NULL THEN allow_overlap ELSE $7 END,
+                priority = COALESCE($8, priority),
+                reason = CASE WHEN $12::boolean THEN $9 ELSE reason END,
+                notes = CASE WHEN $13::boolean THEN $10 ELSE notes END,
+                patient_id = COALESCE($11, patient_id),
                 row_version = row_version + 1,
-                updated_by = $12
+                updated_by = $14
           WHERE id = $1 AND tenant_id = $2`,
         [
           id,
           ctx.tenantId,
-          input.professionalId ?? null,
-          input.serviceId ?? null,
-          input.startAt ?? null,
-          input.endAt ?? null,
+          professionalId,
+          serviceId,
+          startAt,
+          endAt,
+          input.allowOverlap ?? (moving ? false : null),
           input.priority ?? null,
           input.reason ?? null,
           input.notes ?? null,
           input.patientId ?? null,
-          input.allowOverlap ?? null,
+          has('reason'),
+          has('notes'),
           ctx.user.id,
         ],
       );
@@ -354,6 +407,39 @@ export class AppointmentsService {
       if (!row) throw AppError.notFound('Agendamento');
 
       assertAppointmentTransition(row.status as AppointmentStatus, to);
+
+      // Cancelar depois do check-in fecha junto o atendimento que ainda não
+      // começou; se a consulta já começou, quem cancela é o atendimento.
+      if (to === 'cancelled') {
+        const encounter = await tx.query<{ id: string; status: string }>(
+          `SELECT id, status FROM clinical.encounters
+            WHERE tenant_id = $1 AND appointment_id = $2
+              AND status IN ('arrived','triaged','in_progress','on_hold')
+            FOR UPDATE`,
+          [ctx.tenantId, id],
+        );
+        const open = encounter.rows[0];
+        if (open && !['arrived', 'triaged'].includes(open.status)) {
+          throw AppError.conflict('O atendimento já começou. Cancele pelo próprio atendimento.');
+        }
+        if (open) {
+          await tx.query(
+            `UPDATE clinical.encounters
+                SET status = 'cancelled', cancel_reason = $3, ended_at = now(),
+                    row_version = row_version + 1, updated_by = $4
+              WHERE id = $1 AND tenant_id = $2`,
+            [open.id, ctx.tenantId, options.reason ?? 'Agendamento cancelado', ctx.user.id],
+          );
+          await this.audit.record(tx, ctx, {
+            category: 'cancel',
+            action: 'encounter.cancelled',
+            entitySchema: 'clinical',
+            entityTable: 'encounters',
+            entityId: open.id,
+            reason: options.reason ?? null,
+          });
+        }
+      }
 
       await tx.query(
         `UPDATE scheduling.appointments

@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useRef, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -21,6 +21,7 @@ import {
   ScrollText,
   Stethoscope,
   Syringe,
+  UserCheck,
   X,
 } from 'lucide-react';
 import type { EncounterDetail, Patient } from '@chiron/contracts';
@@ -31,6 +32,7 @@ import { useSession } from '@/lib/session';
 import { Badge, Card, CardHeader, ErrorState, PageHeader, Skeleton } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
+import { useStepUp } from '@/components/auth/step-up';
 import { NoteBlock, ObservationGrid, sortNotes } from '@/components/clinical/clinical-blocks';
 import { NoteEditor } from '@/components/clinical/note-editor';
 import { VitalsSheet } from '@/components/clinical/vitals-sheet';
@@ -44,6 +46,7 @@ import { EncounterImmunizations } from '@/components/clinical/encounter-immuniza
 import { PatientSummaryCard } from '@/components/clinical/patient-summary';
 import { EncounterActionBar, type BarAction } from '@/components/clinical/encounter-action-bar';
 import { PatientHistorySheet } from '@/components/clinical/patient-history-sheet';
+import { rememberEncounter } from '@/components/clinical/active-encounter-pill';
 import { NAV_ITEMS } from '@/components/layout/navigation';
 
 type SheetKey = 'vitals' | 'diagnosis' | 'procedure' | 'finish' | 'more' | null;
@@ -61,10 +64,14 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
   const { id } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { can, hasModule } = useSession();
+  const { can, hasModule, context } = useSession();
 
   const [sheet, setSheet] = useState<SheetKey>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+
+  useEffect(() => {
+    rememberEncounter(id);
+  }, [id]);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [vaccineOpen, setVaccineOpen] = useState(false);
   const [examOpen, setExamOpen] = useState(false);
@@ -85,10 +92,12 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
   });
 
   const transition = useMutation({
-    mutationFn: (action: 'start' | 'hold' | 'resume') => api.post<EncounterDetail>(`/encounters/${id}/${action}`),
-    onSuccess: async () => {
+    mutationFn: (action: 'start' | 'hold' | 'resume' | 'assume') =>
+      api.post<EncounterDetail>(`/encounters/${id}/${action}`),
+    onSuccess: async (_result, action) => {
       await queryClient.invalidateQueries({ queryKey: ['encounter', id] });
       await queryClient.invalidateQueries({ queryKey: ['encounters'] });
+      if (action === 'assume') toast.success('Você assumiu o atendimento.');
     },
     onError: (caught) => toast.error(errorMessage(caught)),
   });
@@ -122,8 +131,16 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
   const status = statusFor(ENCOUNTER_STATUS, encounter.status);
   const open = OPEN_STATUSES.includes(encounter.status);
   const writable = open && can('encounter:update');
-  const canFinish = writable && can('encounter:sign');
+  const canSign = can('encounter:sign');
+  // Plantão: outro veterinário abriu, quem está com o paciente agora assume
+  // antes de finalizar (a API recusa a assinatura de quem não é o responsável).
+  const myProfessionalId = context?.membership?.professionalId ?? null;
+  const attending = encounter.attendingProfessional;
+  const someoneElses =
+    open && canSign && Boolean(attending) && attending?.id !== myProfessionalId && !can('encounter:reassign');
+  const canFinish = writable && canSign && !someoneElses;
   const notStarted = ['arrived', 'triaged'].includes(encounter.status);
+  const canStart = writable && notStarted && canSign;
   const notes = sortNotes(encounter.notes);
   const activeNotes = notes.filter((note) => !note.supersededByNoteId);
   const supersededNotes = notes.filter((note) => note.supersededByNoteId);
@@ -198,9 +215,11 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
 
   const primary = canFinish
     ? { label: 'Finalizar', kind: 'finish' as const, onClick: () => void openFinish(), loading: finishing }
-    : writable && notStarted
-      ? { label: 'Iniciar', kind: 'start' as const, onClick: () => transition.mutate('start'), loading: transition.isPending }
-      : undefined;
+    : writable && someoneElses
+      ? { label: 'Assumir', kind: 'assume' as const, onClick: () => transition.mutate('assume'), loading: transition.isPending }
+      : canStart
+        ? { label: 'Iniciar', kind: 'start' as const, onClick: () => transition.mutate('start'), loading: transition.isPending }
+        : undefined;
 
   const patientLine = [
     encounter.patient.speciesName,
@@ -290,7 +309,13 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
                   Retomar
                 </Button>
               )}
-              {writable && notStarted && (
+              {writable && someoneElses && (
+                <Button size="sm" onClick={() => transition.mutate('assume')} loading={transition.isPending}>
+                  <UserCheck className="h-4 w-4" />
+                  Assumir atendimento
+                </Button>
+              )}
+              {canStart && (
                 <Button
                   size="sm"
                   variant={canFinish ? 'secondary' : 'primary'}
@@ -323,6 +348,19 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
         }
       />
       </div>
+
+      {writable && someoneElses && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[13.5px] text-[var(--ink-2)]">
+          <span className="min-w-0 flex-1">
+            Atendimento de <strong className="font-semibold text-[var(--ink)]">{attending?.name}</strong>. Para
+            finalizar e assinar, assuma o atendimento.
+          </span>
+          <Button size="sm" variant="secondary" onClick={() => transition.mutate('assume')} loading={transition.isPending}>
+            <UserCheck className="h-4 w-4" />
+            Assumir
+          </Button>
+        </div>
+      )}
 
       {(activeAllergies.length > 0 || activeAlerts.length > 0) && (
         <div className="mb-4 flex flex-wrap gap-2">
@@ -734,13 +772,17 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 function ReopenButton({ encounterId }: { encounterId: string }) {
   const queryClient = useQueryClient();
+  const stepUp = useStepUp();
   const [reason, setReason] = useState('');
   const [open, setOpen] = useState(false);
 
+  // Reabrir é sensível: a API pede a senha de novo e o hook repete a ação.
   const mutation = useMutation({
-    mutationFn: () => api.post(`/encounters/${encounterId}/reopen`, { reason }),
-    onSuccess: async () => {
+    mutationFn: () => stepUp.run(() => api.post(`/encounters/${encounterId}/reopen`, { reason: reason.trim() })),
+    onSuccess: async (done) => {
+      if (!done) return;
       await queryClient.invalidateQueries({ queryKey: ['encounter', encounterId] });
+      await queryClient.invalidateQueries({ queryKey: ['encounters'] });
       toast.success('Atendimento reaberto. A reabertura fica registrada.');
       setOpen(false);
       setReason('');
@@ -788,6 +830,7 @@ function ReopenButton({ encounterId }: { encounterId: string }) {
           className="w-full rounded-[var(--radius)] border border-[var(--border-strong)] px-3 py-2 text-[15px]"
         />
       </Sheet>
+      {stepUp.dialog}
     </>
   );
 }

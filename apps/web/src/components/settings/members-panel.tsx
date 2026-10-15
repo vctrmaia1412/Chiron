@@ -42,7 +42,8 @@ export function MembersPanel() {
   const changeRole = useMutation({
     mutationFn: ({ id, roleKey }: { id: string; roleKey: string }) =>
       stepUp.run(() => api.patch(`/members/${id}`, { roleKey })),
-    onSuccess: async () => {
+    onSuccess: async (done) => {
+      if (!done) return;
       await queryClient.invalidateQueries({ queryKey: ['members'] });
       toast.success('Papel atualizado.');
     },
@@ -52,7 +53,8 @@ export function MembersPanel() {
   const changeStatus = useMutation({
     mutationFn: ({ id, status }: { id: string; status: 'active' | 'suspended' }) =>
       stepUp.run(() => api.patch(`/members/${id}`, { status })),
-    onSuccess: async () => {
+    onSuccess: async (done) => {
+      if (!done) return;
       await queryClient.invalidateQueries({ queryKey: ['members'] });
       toast.success('Situação atualizada.');
     },

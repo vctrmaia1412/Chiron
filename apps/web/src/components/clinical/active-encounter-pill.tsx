@@ -8,6 +8,25 @@ import type { EncounterSummary } from '@chiron/contracts';
 import { api } from '@/lib/api';
 import { useSession } from '@/lib/session';
 
+const LAST_ENCOUNTER_KEY = 'chiron:ultimo-atendimento';
+
+/** Guarda o último atendimento aberto nesta aba; falha em silêncio sem armazenamento. */
+export function rememberEncounter(id: string): void {
+  try {
+    window.sessionStorage.setItem(LAST_ENCOUNTER_KEY, id);
+  } catch {
+    // modo privado ou armazenamento bloqueado: o atalho usa o primeiro da lista
+  }
+}
+
+function readLastEncounter(): string | null {
+  try {
+    return typeof window === 'undefined' ? null : window.sessionStorage.getItem(LAST_ENCOUNTER_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Atalho de volta para a consulta em andamento. O veterinário sai do
  * atendimento para conferir um exame, a agenda ou outro paciente, e de
@@ -38,7 +57,10 @@ export function ActiveEncounterPill() {
   // consulta em andamento só cobriria o texto que está sendo escrito.
   const insideEncounter = /^\/atendimentos\/[^/]+$/.test(pathname);
   const active = data?.items ?? [];
-  const first = active[0];
+  // Com várias consultas abertas, volta para a última em que o veterinário
+  // estava (guardado só o id, na aba do navegador), não para uma qualquer.
+  const lastVisited = readLastEncounter();
+  const first = active.find((encounter) => encounter.id === lastVisited) ?? active[0];
   if (!enabled || insideEncounter || !first) return null;
 
   return (

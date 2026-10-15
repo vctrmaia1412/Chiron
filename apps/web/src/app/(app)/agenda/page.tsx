@@ -1,12 +1,24 @@
 'use client';
 
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, LogIn, Plus, XCircle } from 'lucide-react';
+import {
+  CalendarClock,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  LogIn,
+  Plus,
+  XCircle,
+} from 'lucide-react';
 import type { Appointment, FollowUp } from '@chiron/contracts';
+
+/** O que já vem preenchido no novo agendamento (retorno, ficha do paciente). */
+type NewAppointmentPreset = { patientId?: string; originEncounterId?: string; reason?: string; date?: Date };
 import { api, errorMessage } from '@/lib/api';
 import { addDays, endOfDay, formatDate, formatTime, formatWeekday, isToday, startOfDay, toIsoDate } from '@/lib/format';
 import { APPOINTMENT_STATUS, statusFor } from '@/lib/labels';
@@ -27,16 +39,43 @@ function AgendaView() {
   const { can } = useSession();
   const { data: professionals = [] } = useProfessionals();
 
-  const [day, setDay] = useState(() => new Date());
-  const [professionalId, setProfessionalId] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
   // A URL é a fonte do estado inicial: o inicializador lê o parâmetro uma vez,
   // sem efeito copiando valor e disparando renderização em cascata.
-  const [formOpen, setFormOpen] = useState(() => Boolean(params.get('novo')));
+  const focusId = params.get('agendamento');
+  const [today] = useState(() => new Date());
+  const [chosenDay, setChosenDay] = useState<Date | null>(() => parseIsoDate(params.get('data')));
+  const [professionalId, setProfessionalId] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [newForm, setNewForm] = useState<NewAppointmentPreset | null>(() =>
+    params.get('novo')
+      ? {
+          patientId: params.get('pacienteId') ?? undefined,
+          originEncounterId: params.get('retornoDe') ?? undefined,
+          reason: params.get('motivo') ?? undefined,
+          date: parseIsoDate(params.get('data')) ?? undefined,
+        }
+      : null,
+  );
+  const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(null);
   const [checkInTarget, setCheckInTarget] = useState<Appointment | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [showFollowUps, setShowFollowUps] = useState(() => Boolean(params.get('retornos')));
-  const presetPatientId = params.get('pacienteId') ?? undefined;
+
+  // Link da busca aponta um agendamento: a agenda abre no dia dele.
+  const { data: focused } = useQuery({
+    queryKey: ['appointment', focusId],
+    queryFn: () => api.get<Appointment>(`/appointments/${focusId}`),
+    enabled: Boolean(focusId) && !chosenDay,
+  });
+  const focusedStart = focused?.startAt;
+  const day = useMemo(
+    () => chosenDay ?? (focusedStart ? new Date(focusedStart) : today),
+    [chosenDay, focusedStart, today],
+  );
+  const setDay = (next: Date) => setChosenDay(next);
+  const scrollToFocused = useCallback((node: HTMLLIElement | null) => {
+    node?.scrollIntoView({ block: 'center' });
+  }, []);
 
   const range = useMemo(() => ({ from: startOfDay(day).toISOString(), to: endOfDay(day).toISOString() }), [day]);
 
@@ -49,6 +88,8 @@ function AgendaView() {
         professionalId: professionalId || undefined,
         limit: 200,
       }),
+    // Recepção e consultório mexem na mesma agenda: atualiza sozinha.
+    refetchInterval: 30_000,
   });
 
   const confirmMutation = useMutation({
@@ -75,7 +116,7 @@ function AgendaView() {
         description={capitalize(formatWeekday(day))}
         actions={
           can('appointment:create') ? (
-            <Button size="sm" onClick={() => setFormOpen(true)}>
+            <Button size="sm" onClick={() => setNewForm({})}>
               <Plus className="h-4 w-4" />
               Agendar
             </Button>
@@ -88,7 +129,7 @@ function AgendaView() {
           <button
             type="button"
             aria-label="Dia anterior"
-            onClick={() => setDay((current) => addDays(current, -1))}
+            onClick={() => setDay(addDays(day, -1))}
             className="flex h-10 w-10 items-center justify-center text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -97,15 +138,15 @@ function AgendaView() {
             type="date"
             value={toIsoDate(day)}
             onChange={(event) => {
-              const [year, month, date] = event.target.value.split('-').map(Number);
-              if (year && month && date) setDay(new Date(year, month - 1, date));
+              const next = parseIsoDate(event.target.value);
+              if (next) setDay(next);
             }}
             className="h-10 border-x border-[var(--border-strong)] bg-transparent px-2 text-[13.5px] text-[var(--ink)] focus:outline-none"
           />
           <button
             type="button"
             aria-label="Próximo dia"
-            onClick={() => setDay((current) => addDays(current, 1))}
+            onClick={() => setDay(addDays(day, 1))}
             className="flex h-10 w-10 items-center justify-center text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
           >
             <ChevronRight className="h-4 w-4" />
@@ -159,7 +200,7 @@ function AgendaView() {
               description={`Nada marcado para ${formatDate(day)}.`}
               action={
                 can('appointment:create') ? (
-                  <Button onClick={() => setFormOpen(true)}>
+                  <Button onClick={() => setNewForm({})}>
                     <Plus className="h-4 w-4" />
                     Agendar
                   </Button>
@@ -176,9 +217,16 @@ function AgendaView() {
                 const canCancel =
                   can('appointment:cancel') &&
                   ['scheduled', 'confirmed', 'checked_in'].includes(appointment.status);
+                const canReschedule =
+                  can('appointment:update') && ['scheduled', 'confirmed'].includes(appointment.status);
+                const isFocused = appointment.id === focusId;
 
                 return (
-                  <li key={appointment.id} className="px-4 py-3">
+                  <li
+                    key={appointment.id}
+                    ref={isFocused ? scrollToFocused : undefined}
+                    className={`px-4 py-3 ${isFocused ? 'bg-[var(--brand-soft)]' : ''}`}
+                  >
                     <div className="flex items-start gap-3">
                       <div className="w-14 shrink-0">
                         <p className="text-[14px] font-semibold tabular text-[var(--ink)]">
@@ -224,7 +272,7 @@ function AgendaView() {
                       </div>
                     </div>
 
-                    {(canCheckIn || canConfirm || canCancel || appointment.encounterId) && (
+                    {(canCheckIn || canConfirm || canCancel || canReschedule || appointment.encounterId) && (
                       <div className="mt-2 flex flex-wrap gap-2 pl-[68px]">
                         {appointment.encounterId && (
                           <Button asChild size="sm" variant="subtle">
@@ -248,6 +296,12 @@ function AgendaView() {
                             Confirmar
                           </Button>
                         )}
+                        {canReschedule && (
+                          <Button size="sm" variant="ghost" onClick={() => setRescheduleTarget(appointment)}>
+                            <CalendarClock className="h-3.5 w-3.5" />
+                            Remarcar
+                          </Button>
+                        )}
                         {canCancel && (
                           <Button size="sm" variant="ghost" onClick={() => setCancelTarget(appointment)}>
                             <XCircle className="h-3.5 w-3.5" />
@@ -263,23 +317,51 @@ function AgendaView() {
           )}
         </Card>
 
-        <FollowUpsCard open={showFollowUps} onOpen={() => setShowFollowUps(true)} />
+        <FollowUpsCard
+          open={showFollowUps}
+          onOpen={() => setShowFollowUps(true)}
+          onSchedule={(followUp) =>
+            setNewForm({
+              patientId: followUp.patientId,
+              originEncounterId: followUp.encounterId,
+              reason: followUp.reason ?? 'Retorno',
+              date: parseIsoDate(followUp.dueAt) ?? undefined,
+            })
+          }
+        />
       </div>
 
       <AppointmentFormSheet
-        open={formOpen}
+        open={newForm !== null}
         onOpenChange={(next) => {
-          setFormOpen(next);
-          if (!next && (params.get('novo') || params.get('pacienteId'))) router.replace('/agenda');
+          if (next) return;
+          setNewForm(null);
+          if (params.get('novo') || params.get('pacienteId')) router.replace('/agenda');
         }}
-        defaultDate={day}
-        defaultPatientId={presetPatientId}
+        defaultDate={newForm?.date ?? day}
+        defaultPatientId={newForm?.patientId}
+        defaultReason={newForm?.reason}
+        originEncounterId={newForm?.originEncounterId}
+        onSaved={(saved) => setDay(new Date(saved.startAt))}
+      />
+
+      <AppointmentFormSheet
+        key={rescheduleTarget?.id ?? 'remarcar'}
+        open={Boolean(rescheduleTarget)}
+        onOpenChange={(next) => {
+          if (!next) setRescheduleTarget(null);
+        }}
+        appointment={rescheduleTarget}
+        onSaved={(saved) => setDay(new Date(saved.startAt))}
       />
 
       <CheckInSheet
         appointment={checkInTarget}
         onClose={() => setCheckInTarget(null)}
-        onCheckedIn={(encounterId) => router.push(`/atendimentos/${encounterId}`)}
+        // Recepção faz o check-in e continua na agenda; quem atende vai direto.
+        onCheckedIn={(encounterId) => {
+          if (can('encounter:update')) router.push(`/atendimentos/${encounterId}`);
+        }}
       />
 
       <CancelAppointmentSheet appointment={cancelTarget} onClose={() => setCancelTarget(null)} />
@@ -291,7 +373,21 @@ function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function FollowUpsCard({ open, onOpen }: { open: boolean; onOpen: () => void }) {
+/** "2026-10-15" vira a data local (sem fuso deslocando o dia). */
+function parseIsoDate(value: string | null): Date | null {
+  const [year, month, date] = (value ?? '').split('-').map(Number);
+  return year && month && date ? new Date(year, month - 1, date) : null;
+}
+
+function FollowUpsCard({
+  open,
+  onOpen,
+  onSchedule,
+}: {
+  open: boolean;
+  onOpen: () => void;
+  onSchedule: (followUp: FollowUp) => void;
+}) {
   const { can } = useSession();
   const { data, isLoading } = useQuery({
     queryKey: ['follow-ups'],
@@ -301,8 +397,9 @@ function FollowUpsCard({ open, onOpen }: { open: boolean; onOpen: () => void }) 
 
   const items = data?.items ?? [];
 
+  // No celular o cartão aparece quando há retorno pendente, abaixo da agenda.
   return (
-    <Card className={open ? '' : 'hidden lg:block'}>
+    <Card className={open || items.length > 0 ? '' : 'hidden lg:block'}>
       <CardHeader
         title="Retornos a agendar"
         description="Atendimentos que pediram reavaliação e ainda não têm horário marcado."
@@ -336,8 +433,8 @@ function FollowUpsCard({ open, onOpen }: { open: boolean; onOpen: () => void }) 
                 </div>
               </div>
               <div className="mt-2">
-                <Button asChild size="sm" variant="secondary">
-                  <Link href={`/agenda?novo=1&pacienteId=${followUp.patientId}`}>Agendar retorno</Link>
+                <Button size="sm" variant="secondary" onClick={() => onSchedule(followUp)}>
+                  Agendar retorno
                 </Button>
               </div>
             </li>

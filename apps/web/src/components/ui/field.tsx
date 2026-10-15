@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useId } from 'react';
+import { cloneElement, forwardRef, isValidElement, useId } from 'react';
 import { cn } from '@/lib/cn';
 
 const baseControl =
@@ -48,20 +48,54 @@ export interface FieldProps {
   htmlFor?: string;
 }
 
+const CONTROL_TYPES: unknown[] = ['input', 'select', 'textarea', Input, Select, Textarea];
+
+/**
+ * Rótulo, controle e mensagem ligados entre si. Quando o campo tem um único
+ * controle (Input, Select, Textarea), o id é gerado e o rótulo aponta para
+ * ele sozinho: leitor de tela anuncia o nome certo e tocar no rótulo foca o
+ * campo, sem cada formulário precisar lembrar de `htmlFor`.
+ */
 export function Field({ label, hint, error, required, children, className, htmlFor }: FieldProps) {
+  const generatedId = useId();
+  let controlId = htmlFor;
+  let content = children;
+
+  if (!controlId && isValidElement<{ id?: string }>(children) && CONTROL_TYPES.includes(children.type)) {
+    controlId = children.props.id ?? generatedId;
+    if (!children.props.id) content = cloneElement(children, { id: controlId });
+  }
+
+  const messageId = controlId ? `${controlId}-mensagem` : undefined;
+  if (controlId && isValidElement(content) && CONTROL_TYPES.includes(content.type)) {
+    content = cloneElement(content as React.ReactElement<Record<string, unknown>>, {
+      'aria-describedby': error || hint ? messageId : undefined,
+      'aria-invalid': error ? true : undefined,
+      'aria-required': required ? true : undefined,
+    });
+  }
+
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
       {label && (
-        <label htmlFor={htmlFor} className="text-[13px] font-medium text-[var(--ink-2)]">
+        <label htmlFor={controlId} className="text-[13px] font-medium text-[var(--ink-2)]">
           {label}
-          {required && <span className="ml-0.5 text-[var(--danger)]">*</span>}
+          {required && (
+            <span aria-hidden className="ml-0.5 text-[var(--danger)]">
+              *
+            </span>
+          )}
         </label>
       )}
-      {children}
+      {content}
       {error ? (
-        <p className="text-[12.5px] text-[var(--danger)]">{error}</p>
+        <p id={messageId} className="text-[12.5px] text-[var(--danger)]">
+          {error}
+        </p>
       ) : hint ? (
-        <p className="text-[12.5px] text-[var(--ink-3)]">{hint}</p>
+        <p id={messageId} className="text-[12.5px] text-[var(--ink-3)]">
+          {hint}
+        </p>
       ) : null}
     </div>
   );

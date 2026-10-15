@@ -240,6 +240,11 @@ export const listEncountersQuerySchema = paginationQuerySchema.extend({
   to: isoDateTimeSchema.optional(),
   q: z.string().trim().max(120).optional(),
   open: queryBoolean.optional(),
+  /**
+   * Etapa da fila: `waiting` (chegou ou triado), `active` (em curso ou pausado)
+   * e `stale` (aberto há mais de um dia, esquecido sem finalizar).
+   */
+  stage: z.enum(['waiting', 'active', 'stale']).optional(),
 });
 
 // ----------------------------------------------------------- prescription

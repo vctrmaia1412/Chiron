@@ -39,7 +39,8 @@ export default function GuardianPage({ params }: { params: Promise<{ id: string 
   const anonymize = useMutation({
     mutationFn: () =>
       stepUp.run(() => api.post(`/guardians/${id}/anonymize`, { confirm: true })),
-    onSuccess: async () => {
+    onSuccess: async (done) => {
+      if (!done) return;
       await queryClient.invalidateQueries({ queryKey: ['guardian', id] });
       toast.success('Dados pessoais anonimizados. O histórico clínico dos pacientes permanece.');
       setAnonymizeOpen(false);

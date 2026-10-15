@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError } from '@/lib/api';
 import { useSession } from '@/lib/session';
@@ -10,6 +10,69 @@ import { MobileNav } from '@/components/layout/mobile-nav';
 import { ActiveEncounterPill } from '@/components/clinical/active-encounter-pill';
 import { Spinner } from '@/components/ui/primitives';
 import { Logo } from '@/components/brand/logo';
+
+/**
+ * Sessão sem clínica ativa. Quem participa de mais de uma escolhe aqui (antes
+ * caía numa tela sem saída dizendo que não tinha vínculo); quem não participa
+ * de nenhuma vê o aviso e pode sair para entrar com outra conta.
+ */
+function NoActiveOrganization() {
+  const { context, switchTenant, logout } = useSession();
+  const [choosing, setChoosing] = useState<string | null>(null);
+  const tenants = context?.availableTenants ?? [];
+
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center px-6">
+      <div className="w-full max-w-sm">
+        <Logo className="mb-6 h-8" />
+        {tenants.length > 0 ? (
+          <>
+            <h1 className="text-lg font-semibold text-[var(--ink)]">Escolha a organização</h1>
+            <p className="mt-1 text-sm text-[var(--ink-3)]">Você participa de mais de uma clínica.</p>
+            <div className="mt-5 space-y-2">
+              {tenants.map((tenant) => (
+                <button
+                  key={tenant.id}
+                  type="button"
+                  disabled={Boolean(choosing)}
+                  onClick={async () => {
+                    setChoosing(tenant.id);
+                    try {
+                      await switchTenant(tenant.id);
+                    } finally {
+                      setChoosing(null);
+                    }
+                  }}
+                  className="flex w-full items-center justify-between rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-3 text-left transition-colors hover:border-[var(--brand)] hover:bg-[var(--brand-soft)] disabled:opacity-60"
+                >
+                  <span>
+                    <span className="block text-sm font-medium text-[var(--ink)]">{tenant.name}</span>
+                    <span className="block text-[13px] text-[var(--ink-3)]">
+                      {tenant.facilities.length === 1 ? tenant.facilities[0]?.name : `${tenant.facilities.length} unidades`}
+                    </span>
+                  </span>
+                  {choosing === tenant.id && <Spinner />}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-[var(--ink-2)]">Sua conta não está vinculada a nenhuma organização ativa.</p>
+            <p className="mt-1 text-[13px] text-[var(--ink-3)]">Fale com o administrador da clínica.</p>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="mt-6 text-sm font-medium text-[var(--brand)]"
+        >
+          Sair e entrar com outra conta
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -47,15 +110,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   if (!context.tenant) {
-    return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 px-6 text-center">
-        <Logo className="h-8" />
-        <p className="text-sm text-[var(--ink-2)]">
-          Sua conta não está vinculada a nenhuma organização ativa.
-        </p>
-        <p className="text-[13px] text-[var(--ink-3)]">Fale com o administrador da clínica.</p>
-      </div>
-    );
+    return <NoActiveOrganization />;
   }
 
   return (

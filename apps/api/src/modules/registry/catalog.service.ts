@@ -283,7 +283,7 @@ export class CatalogService {
             SET name = COALESCE($3, name),
                 category = COALESCE($4, category),
                 default_duration_min = COALESCE($5, default_duration_min),
-                default_price = COALESCE($6, default_price),
+                default_price = CASE WHEN $11::boolean THEN $6::numeric ELSE default_price END,
                 requires_professional = COALESCE($7, requires_professional),
                 requires_resource = COALESCE($8, requires_resource),
                 color = COALESCE($9, color),
@@ -303,6 +303,7 @@ export class CatalogService {
           input.requiresResource ?? null,
           input.color ?? null,
           input.active ?? null,
+          Object.prototype.hasOwnProperty.call(input, 'defaultPrice'),
         ],
       );
       if (rows.length === 0) throw AppError.notFound('Serviço');
