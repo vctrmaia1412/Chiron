@@ -404,9 +404,10 @@ export class AppointmentsService {
         facility_id: string;
         encounter_id: string | null;
         service_category: string;
+        reason: string | null;
       }>(
         `SELECT a.status, a.patient_id, a.professional_id, a.service_id, a.facility_id, a.encounter_id,
-                sc.category AS service_category
+                sc.category AS service_category, a.reason
            FROM scheduling.appointments a
            JOIN registry.service_catalog sc ON sc.id = a.service_id AND sc.tenant_id = a.tenant_id
           WHERE a.id = $1 AND a.tenant_id = $2 FOR UPDATE`,
@@ -438,8 +439,8 @@ export class AppointmentsService {
       await tx.query(
         `INSERT INTO clinical.encounters
            (id, tenant_id, facility_id, number, patient_id, appointment_id, service_id, class, status,
-            attending_professional_id, arrived_at, created_by, updated_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'arrived',$9, now(), $10, $10)`,
+            attending_professional_id, arrived_at, chief_complaint, created_by, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'arrived',$9, now(), $10, $11, $11)`,
         [
           newEncounterId,
           ctx.tenantId,
@@ -450,9 +451,21 @@ export class AppointmentsService {
           appointment.service_id,
           encounterClass,
           appointment.professional_id,
+          appointment.reason?.slice(0, 500) ?? null,
           ctx.user.id,
         ],
       );
+
+      // O motivo informado ao agendar vira o começo da queixa principal: quem
+      // atende completa o que o tutor contou ao telefone, sem perguntar de novo.
+      if (appointment.reason?.trim()) {
+        await tx.query(
+          `INSERT INTO clinical.encounter_notes
+             (id, tenant_id, encounter_id, patient_id, kind, body, author_professional_id, author_user_id, status, sequence)
+           VALUES ($1,$2,$3,$4,'chief_complaint',$5,$6,$7,'draft',1)`,
+          [uuidv7(), ctx.tenantId, newEncounterId, appointment.patient_id, appointment.reason.trim(), ctx.professionalId, ctx.user.id],
+        );
+      }
 
       await tx.query(
         `UPDATE scheduling.appointments

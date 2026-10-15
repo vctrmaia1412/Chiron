@@ -4,3 +4,7 @@ export * from './units';
 export * from './dose';
 export * from './clinical-rules';
 export * from './identifiers';
+export * from './physical-exam';
+export * from './record-completeness';
+export * from './vaccine-schedule';
+export * from './template-suggestion';

@@ -8,7 +8,7 @@ import type { ExamOrder } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { useExamCatalog } from '@/lib/catalog';
 import { useSession } from '@/lib/session';
-import { Card, CardHeader, EmptyState, ListSkeleton } from '@/components/ui/primitives';
+import { Card, CardHeader, ListSkeleton } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
 import { Checkbox, Field, Select, Textarea } from '@/components/ui/field';
@@ -19,13 +19,20 @@ export function EncounterExams({
   encounterId,
   patientId,
   writable,
+  formOpen: controlledOpen,
+  onFormOpenChange,
 }: {
   encounterId: string;
   patientId: string;
   writable: boolean;
+  /** Aberto de fora, pela barra de ações do celular. */
+  formOpen?: boolean;
+  onFormOpenChange?: (open: boolean) => void;
 }) {
   const { can } = useSession();
-  const [formOpen, setFormOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const formOpen = controlledOpen ?? internalOpen;
+  const setFormOpen = onFormOpenChange ?? setInternalOpen;
 
   const { data, isLoading } = useQuery({
     queryKey: ['exam-orders', encounterId],
@@ -51,19 +58,10 @@ export function EncounterExams({
         {isLoading ? (
           <ListSkeleton rows={2} />
         ) : items.length === 0 ? (
-          <EmptyState
-            icon={<FlaskConical className="h-7 w-7" />}
-            title="Nenhum exame solicitado"
-            description="Os pedidos ficam vinculados a este atendimento e ao prontuário do paciente."
-            action={
-              writable && can('exam_order:create') ? (
-                <Button onClick={() => setFormOpen(true)}>
-                  <Plus className="h-4 w-4" />
-                  Solicitar exame
-                </Button>
-              ) : undefined
-            }
-          />
+          <p className="flex items-center gap-2 px-4 py-3.5 text-[13.5px] text-[var(--ink-3)]">
+            <FlaskConical className="h-4 w-4" />
+            Nenhum exame solicitado neste atendimento.
+          </p>
         ) : (
           <div className="space-y-3 px-4 py-4">
             {items.map((order) => (

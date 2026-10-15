@@ -4,6 +4,8 @@ import { OBSERVATION_CODES } from '@chiron/domain';
 import { env } from '../config/env';
 import { SPECIES_CATALOG } from './reference/species';
 import { EXAM_CATALOG, REFERENCE_RANGES } from './reference/exams';
+import { CONDITIONS, NOTE_TEMPLATES, VACCINE_PROTOCOLS } from './reference/charting';
+import { stableUuid } from '../common/uuid';
 
 /**
  * Dado de referência do produto (módulos, planos, permissões, espécies,
@@ -205,6 +207,8 @@ export async function syncReferenceData(connectionString?: string): Promise<void
       );
     }
 
+    await syncChartingCatalog(client, speciesIds);
+
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -212,6 +216,77 @@ export async function syncReferenceData(connectionString?: string): Promise<void
   } finally {
     await client.end();
   }
+}
+
+/**
+ * Modelos de nota, protocolos vacinais e diagnósticos de fábrica. Linhas
+ * globais (`tenant_id` nulo) com id estável derivado da chave, então rodar de
+ * novo atualiza em vez de duplicar, e o que saiu da lista é desativado em vez
+ * de apagado, porque nota e aplicação antigas podem apontar para ele.
+ */
+async function syncChartingCatalog(client: Client, speciesIds: Map<string, string>): Promise<void> {
+  const templateIds: string[] = [];
+  for (const template of NOTE_TEMPLATES) {
+    const id = stableUuid(`note-template:${template.key}`);
+    templateIds.push(id);
+    const schema = {
+      shortcut: template.shortcut,
+      speciesCodes: template.species ?? [],
+      serviceCategories: template.serviceCategories ?? [],
+      keywords: template.keywords ?? [],
+      sections: template.sections ?? {},
+    };
+    await client.query(
+      `INSERT INTO clinical.note_templates (id, tenant_id, species_id, kind, name, schema, body_default, active)
+       VALUES ($1, NULL, NULL, $2, $3, $4, $5, true)
+       ON CONFLICT (id) DO UPDATE
+         SET kind = EXCLUDED.kind, name = EXCLUDED.name, schema = EXCLUDED.schema,
+             body_default = EXCLUDED.body_default, active = true`,
+      [id, template.kind, template.name, JSON.stringify(schema), template.body ?? null],
+    );
+  }
+  await client.query(
+    `UPDATE clinical.note_templates SET active = false WHERE tenant_id IS NULL AND id <> ALL($1::uuid[])`,
+    [templateIds],
+  );
+
+  const protocolIds: string[] = [];
+  for (const protocol of VACCINE_PROTOCOLS) {
+    const speciesId = speciesIds.get(protocol.species);
+    if (!speciesId) continue;
+    const id = stableUuid(`vaccine-protocol:${protocol.key}`);
+    protocolIds.push(id);
+    await client.query(
+      `INSERT INTO immunization.protocols (id, tenant_id, species_id, name, kind, steps, booster_interval_days, active)
+       VALUES ($1, NULL, $2, $3, 'vaccine', $4, $5, true)
+       ON CONFLICT (id) DO UPDATE
+         SET species_id = EXCLUDED.species_id, name = EXCLUDED.name, steps = EXCLUDED.steps,
+             booster_interval_days = EXCLUDED.booster_interval_days, active = true`,
+      [id, speciesId, protocol.name, JSON.stringify(protocol.steps), protocol.boosterIntervalDays],
+    );
+  }
+  await client.query(
+    `UPDATE immunization.protocols SET active = false WHERE tenant_id IS NULL AND id <> ALL($1::uuid[])`,
+    [protocolIds],
+  );
+
+  for (const condition of CONDITIONS) {
+    const scope = condition.species
+      ?.map((code) => speciesIds.get(code))
+      .filter((id): id is string => Boolean(id));
+    await client.query(
+      `INSERT INTO clinical.conditions (tenant_id, code, code_system, name, species_scope, active)
+       VALUES (NULL, $1, 'internal', $2, $3, true)
+       ON CONFLICT (tenant_id, code_system, code) DO UPDATE
+         SET name = EXCLUDED.name, species_scope = EXCLUDED.species_scope, active = true`,
+      [condition.code, condition.name, scope?.length ? scope : null],
+    );
+  }
+  await client.query(
+    `UPDATE clinical.conditions SET active = false
+      WHERE tenant_id IS NULL AND code_system = 'internal' AND code <> ALL($1::text[])`,
+    [CONDITIONS.map((condition) => condition.code)],
+  );
 }
 
 if (require.main === module) {

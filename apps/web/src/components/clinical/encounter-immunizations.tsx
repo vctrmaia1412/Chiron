@@ -4,12 +4,14 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Syringe } from 'lucide-react';
-import type { Immunization, PreventiveTreatment } from '@chiron/contracts';
+import type { Immunization, PatientProtocolSuggestion, PreventiveTreatment } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { addDays, formatDate, formatDateTime, toIsoDate } from '@/lib/format';
 import { ROUTE, labelFor } from '@/lib/labels';
 import { useSession } from '@/lib/session';
-import { Badge, Card, CardHeader, EmptyState, ListSkeleton } from '@/components/ui/primitives';
+import { useVaccineProtocols } from '@/lib/charting';
+import { cn } from '@/lib/cn';
+import { Badge, Card, CardHeader, ListSkeleton } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
@@ -19,13 +21,20 @@ export function EncounterImmunizations({
   encounterId,
   patientId,
   writable,
+  vaccineOpen: controlledOpen,
+  onVaccineOpenChange,
 }: {
   encounterId: string;
   patientId: string;
   writable: boolean;
+  /** Aberto de fora, pela barra de ações do celular. */
+  vaccineOpen?: boolean;
+  onVaccineOpenChange?: (open: boolean) => void;
 }) {
   const { can } = useSession();
-  const [vaccineOpen, setVaccineOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const vaccineOpen = controlledOpen ?? internalOpen;
+  const setVaccineOpen = onVaccineOpenChange ?? setInternalOpen;
   const [preventiveOpen, setPreventiveOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -64,19 +73,10 @@ export function EncounterImmunizations({
         {isLoading ? (
           <ListSkeleton rows={2} />
         ) : empty ? (
-          <EmptyState
-            icon={<Syringe className="h-7 w-7" />}
-            title="Nenhuma aplicação neste atendimento"
-            description="As aplicações entram na carteira do paciente e geram a pendência da próxima dose."
-            action={
-              writable && can('immunization:apply') ? (
-                <Button onClick={() => setVaccineOpen(true)}>
-                  <Plus className="h-4 w-4" />
-                  Registrar vacina
-                </Button>
-              ) : undefined
-            }
-          />
+          <p className="flex items-center gap-2 px-4 py-3.5 text-[13.5px] text-[var(--ink-3)]">
+            <Syringe className="h-4 w-4" />
+            Nenhuma aplicação neste atendimento.
+          </p>
         ) : (
           <ul className="divide-y divide-[var(--border)]">
             {immunizations.map((immunization) => (
@@ -153,6 +153,8 @@ function VaccineSheetContent({
   patientId: string;
 }) {
   const queryClient = useQueryClient();
+  const { data: protocols = [] } = useVaccineProtocols(patientId, open);
+  const [protocolId, setProtocolId] = useState<string | null>(null);
   const [vaccineName, setVaccineName] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [lotNumber, setLotNumber] = useState('');
@@ -162,12 +164,27 @@ function VaccineSheetContent({
   const [doseNumber, setDoseNumber] = useState('');
   const [nextDueAt, setNextDueAt] = useState(toIsoDate(addDays(new Date(), 365)));
   const [reactionNotes, setReactionNotes] = useState('');
+  const [lotFromHistory, setLotFromHistory] = useState(false);
+  const [showMore, setShowMore] = useState(false);
+
+  /** Protocolo escolhido preenche tudo o que já se sabe; o lote vem do frasco em uso na clínica. */
+  function pickProtocol(protocol: PatientProtocolSuggestion) {
+    setProtocolId(protocol.id);
+    setVaccineName(protocol.name);
+    setDoseNumber(String(protocol.nextDoseNumber));
+    setNextDueAt(protocol.suggestedNextDueAt ?? '');
+    setManufacturer(protocol.lot?.manufacturer ?? '');
+    setLotNumber(protocol.lot?.lotNumber ?? '');
+    setExpiresAt(protocol.lot?.expiresAt ?? '');
+    setLotFromHistory(Boolean(protocol.lot?.lotNumber));
+  }
 
   const mutation = useMutation({
     mutationFn: () =>
       api.post('/immunizations', {
         patientId,
         encounterId,
+        protocolId: protocolId ?? undefined,
         vaccineName: vaccineName.trim(),
         manufacturer: manufacturer.trim() || undefined,
         lotNumber: lotNumber.trim() || undefined,
@@ -182,7 +199,9 @@ function VaccineSheetContent({
       await queryClient.invalidateQueries({ queryKey: ['immunizations'] });
       await queryClient.invalidateQueries({ queryKey: ['timeline', patientId] });
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success('Vacina registrada.');
+      await queryClient.invalidateQueries({ queryKey: ['vaccine-protocols', patientId] });
+      await queryClient.invalidateQueries({ queryKey: ['patient-summary', patientId] });
+      toast.success('Vacina registrada. A próxima dose já está na lista de pendências.');
       onOpenChange(false);
     },
     onError: (error) => toast.error(errorMessage(error)),
@@ -215,55 +234,146 @@ function VaccineSheetContent({
         </>
       }
     >
-      <div className="space-y-3">
-        <Field label="Vacina" required>
+      <div className="space-y-4">
+        {protocols.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-[13px] font-medium text-[var(--ink-2)]">Protocolos para a espécie</p>
+            <div className="flex flex-wrap gap-1.5">
+              {protocols.map((protocol) => (
+                <button
+                  key={protocol.id}
+                  type="button"
+                  aria-pressed={protocolId === protocol.id}
+                  onClick={() => pickProtocol(protocol)}
+                  className={cn(
+                    'rounded-[var(--radius)] border px-3 py-2 text-left transition-colors',
+                    protocolId === protocol.id
+                      ? 'border-[var(--brand)] bg-[var(--brand-soft)]'
+                      : 'border-[var(--border-strong)] hover:bg-[var(--surface-2)]',
+                  )}
+                >
+                  <span className="block text-[13.5px] font-medium text-[var(--ink)]">{protocol.name}</span>
+                  <span className="block text-[12px] text-[var(--ink-3)]">
+                    {protocol.nextDoseLabel}
+                    {protocol.dosesGiven > 0
+                      ? ` · ${protocol.dosesGiven} já aplicada${protocol.dosesGiven > 1 ? 's' : ''}`
+                      : ''}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Field label="Vacina" required htmlFor="vaccine-name">
           <Input
-            autoFocus
+            id="vaccine-name"
             value={vaccineName}
-            onChange={(event) => setVaccineName(event.target.value)}
+            onChange={(event) => {
+              setVaccineName(event.target.value);
+              setProtocolId(null);
+            }}
             placeholder="Ex.: V10 (polivalente canina)"
           />
         </Field>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Fabricante">
-            <Input value={manufacturer} onChange={(event) => setManufacturer(event.target.value)} />
-          </Field>
-          <Field label="Lote">
-            <Input value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} />
-          </Field>
-          <Field label="Validade do frasco">
-            <Input type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} />
-          </Field>
-          <Field label="Dose número">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Dose nº" htmlFor="vaccine-dose">
             <Input
+              id="vaccine-dose"
               value={doseNumber}
               onChange={(event) => setDoseNumber(event.target.value)}
               inputMode="numeric"
               placeholder="1, 2, 3"
             />
           </Field>
-          <Field label="Via">
-            <Select value={route} onChange={(event) => setRoute(event.target.value)}>
-              {Object.entries(ROUTE).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Local de aplicação">
-            <Input value={site} onChange={(event) => setSite(event.target.value)} placeholder="Região escapular" />
+          <Field label="Próxima dose" htmlFor="vaccine-next">
+            <Input
+              id="vaccine-next"
+              type="date"
+              value={nextDueAt}
+              onChange={(event) => setNextDueAt(event.target.value)}
+            />
           </Field>
         </div>
 
-        <Field label="Próxima dose" hint="Gera a pendência que aparece no painel e na lista de vacinas.">
-          <Input type="date" value={nextDueAt} onChange={(event) => setNextDueAt(event.target.value)} />
-        </Field>
+        {lotFromHistory ? (
+          <div className="flex items-center justify-between gap-2 rounded-[var(--radius)] bg-[var(--surface-2)] px-3 py-2.5">
+            <p className="text-[13px] text-[var(--ink-2)]">
+              Frasco em uso: <strong className="text-[var(--ink)]">{manufacturer || 'fabricante não informado'}</strong>
+              {` · lote ${lotNumber}`}
+              {expiresAt ? ` · val. ${formatDate(expiresAt)}` : ''}
+            </p>
+            <button
+              type="button"
+              onClick={() => setLotFromHistory(false)}
+              className="shrink-0 text-[12.5px] font-medium text-[var(--brand)]"
+            >
+              Outro frasco
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Field label="Fabricante" htmlFor="vaccine-manufacturer" className="col-span-2 sm:col-span-1">
+              <Input
+                id="vaccine-manufacturer"
+                value={manufacturer}
+                onChange={(event) => setManufacturer(event.target.value)}
+              />
+            </Field>
+            <Field label="Lote" htmlFor="vaccine-lot">
+              <Input id="vaccine-lot" value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} />
+            </Field>
+            <Field label="Validade" htmlFor="vaccine-expiry">
+              <Input
+                id="vaccine-expiry"
+                type="date"
+                value={expiresAt}
+                onChange={(event) => setExpiresAt(event.target.value)}
+              />
+            </Field>
+          </div>
+        )}
 
-        <Field label="Reação observada">
-          <Textarea value={reactionNotes} onChange={(event) => setReactionNotes(event.target.value)} rows={2} />
-        </Field>
+        {showMore ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Via" htmlFor="vaccine-route">
+                <Select id="vaccine-route" value={route} onChange={(event) => setRoute(event.target.value)}>
+                  {Object.entries(ROUTE).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Local de aplicação" htmlFor="vaccine-site">
+                <Input
+                  id="vaccine-site"
+                  value={site}
+                  onChange={(event) => setSite(event.target.value)}
+                  placeholder="Região escapular"
+                />
+              </Field>
+            </div>
+            <Field label="Reação observada" htmlFor="vaccine-reaction">
+              <Textarea
+                id="vaccine-reaction"
+                value={reactionNotes}
+                onChange={(event) => setReactionNotes(event.target.value)}
+                rows={2}
+              />
+            </Field>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowMore(true)}
+            className="text-[13px] font-medium text-[var(--brand)]"
+          >
+            + Via ({labelFor(ROUTE, route)}), local e reação
+          </button>
+        )}
       </div>
     </Sheet>
   );

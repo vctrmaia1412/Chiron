@@ -155,8 +155,8 @@ export class ImmunizationService {
         `INSERT INTO immunization.immunizations
            (id, tenant_id, patient_id, encounter_id, vaccine_name, manufacturer, lot_number, expires_at,
             administered_at, professional_id, administered_by_user_id, route, site, dose_number,
-            next_due_at, status, reaction_notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9::timestamptz, now()), $10,$11,$12,$13,$14,$15,'completed',$16)`,
+            next_due_at, status, reaction_notes, protocol_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9::timestamptz, now()), $10,$11,$12,$13,$14,$15,'completed',$16,$17)`,
         [
           immunizationId,
           ctx.tenantId,
@@ -174,6 +174,7 @@ export class ImmunizationService {
           input.doseNumber ?? null,
           input.nextDueAt ?? null,
           input.reactionNotes ?? null,
+          input.protocolId ?? null,
         ],
       );
 

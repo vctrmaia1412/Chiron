@@ -3,9 +3,59 @@
 Estado real do CHIRON, verificado por execução, não por intenção. Cada item
 marcado como pronto foi exercitado contra banco e API de verdade.
 
-Atualizado em 17 de agosto de 2026.
+Atualizado em 15 de outubro de 2026.
 
 ## Pronto
+
+### Atendimento rápido (15 de outubro de 2026)
+
+Princípio: texto livre primeiro, estrutura depois; digitar uma vez; normal por
+padrão; nenhum campo obrigatório além do mínimo legal. Verificado com testes de
+integração e percorrido num navegador em tela de celular (390 px) e de
+computador.
+
+- Atendimento numa tela só, sem abas. No celular, barra inferior de ações
+  (sinais, diagnóstico ou vacina conforme o serviço, receita, mais, finalizar)
+  no lugar da navegação geral; no computador, resumo e sinais na coluna direita.
+- Resumo do paciente antes da primeira linha: problemas em aberto, medicação
+  em uso (sem repetição), última consulta com diagnóstico e conduta, vacinas e
+  preventivos vencendo.
+- Registro com salvamento automático em fila por seção e gravação forçada
+  antes de assinar, para nenhum trecho digitado ficar fora do registro selado.
+- Atalhos com barra (`/otite`, `/sad`, `/piora`) e modelos por queixa e por
+  serviço: 10 modelos e 7 frases de fábrica, mais os da clínica, criados a
+  partir do próprio registro. O modelo é sugerido pela queixa ("coçando a
+  orelha" sugere otite) ou pelo tipo de serviço. Tab leva à próxima lacuna
+  `__`, e a finalização avisa se sobrou alguma.
+- Exame físico normal por padrão, por grupo de espécie (pequenos animais,
+  exóticos, aves, répteis, equinos, ruminantes, suínos): o veterinário marca só
+  o sistema alterado.
+- Ditado pelo reconhecimento de fala do navegador, na seção selecionada.
+- Indicador do conteúdo mínimo da Res. CFMV 1.321/2020 que avisa e não trava.
+- Diagnóstico com busca sem acento em 117 diagnósticos por espécie e no
+  histórico da clínica, com opção de levar à lista de problemas (ativo ou
+  crônico), sem duplicar.
+- Receita que começa pelo nome: sugestões do que a clínica já assinou, com a
+  posologia da última vez; repetir a última receita; protocolos da clínica;
+  intervalo e duração em um toque; campos raros recolhidos; orientação sobre
+  controlados (Portaria MAPA 837/2025 e SNCR da Anvisa).
+- Vacina por protocolo: 14 protocolos por espécie definem a dose da vez e a
+  data da próxima, e o lote em uso na clínica vem preenchido.
+- Procedimento registrável pela tela.
+- Finalizar com retorno em um toque (7, 15, 30 dias) e mensagem pronta para o
+  tutor pelo WhatsApp.
+- Sem retrabalho: o motivo do agendamento e a queixa do atendimento sem agenda
+  viram a nota de queixa principal; triagem e observação da recepção aparecem
+  durante a consulta (antes só depois de finalizar); começar a escrever inicia
+  o atendimento.
+- Limite de taxa em três cotas por IP: login, uso autenticado
+  (`RATE_LIMIT_AUTHENTICATED_PER_MIN`, padrão 600) e anônimo (60). Antes a
+  cota de 60 valia para toda a API, e uma clínica atrás de um IP só travaria.
+- Microfone liberado para a própria origem no `Permissions-Policy` (web e
+  proxy), condição para o ditado.
+- `Sidebar.tsx` e `Topbar.tsx` renomeados para minúsculas, como são
+  importados: no Linux (Docker, CI, servidor) o build não os encontrava.
+- Guia de hospedagem gratuita: `docs/DEPLOY_GRATUITO.md`.
 
 ### Fundação
 

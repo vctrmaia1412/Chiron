@@ -26,6 +26,7 @@ export type Immunization = z.infer<typeof immunizationSchema>;
 export const createImmunizationSchema = z.object({
   patientId: uuidSchema,
   encounterId: uuidSchema.optional(),
+  protocolId: uuidSchema.optional(),
   vaccineName: shortTextSchema,
   manufacturer: z.string().trim().max(120).optional(),
   lotNumber: z.string().trim().max(60).optional(),

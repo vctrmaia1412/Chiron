@@ -27,6 +27,7 @@ import { AppError } from '../../common/errors';
 import { uuidv7 } from '../../common/uuid';
 import type { RequestContext } from '../../common/request-context';
 import { contextToTenantContext, facilityScope } from '../../common/request-context';
+import { upsertProblemInTx } from './problems';
 
 const ENCOUNTER_SELECT = `
   e.id, e.number::text AS number, e.facility_id, e.class, e.status, e.appointment_id,
@@ -123,6 +124,7 @@ export class EncountersService {
       class: row.class as EncounterSummary['class'],
       status: row.status as EncounterSummary['status'],
       serviceName: row.service_name,
+      serviceCategory: row.service_category,
       attendingProfessional: row.professional_id
         ? { id: row.professional_id, name: row.professional_name ?? '' }
         : null,
@@ -342,6 +344,15 @@ export class EncountersService {
             WHERE id = $1 AND tenant_id = $2 AND encounter_id IS NULL`,
           [input.appointmentId, ctx.tenantId, encounterId],
         );
+      }
+
+      // A queixa contada na recepção já é o começo do registro: o veterinário
+      // encontra a seção preenchida e só completa, em vez de perguntar de novo.
+      if (input.chiefComplaint) {
+        await this.upsertNoteInTx(tx, ctx, encounterId, input.patientId, {
+          kind: 'chief_complaint',
+          body: input.chiefComplaint,
+        });
       }
 
       await this.audit.record(tx, ctx, {
@@ -816,6 +827,23 @@ export class EncountersService {
         entityTable: 'encounter_diagnoses',
         entityId: diagnosisId,
       });
+
+      if (input.addToProblems === 'active' || input.addToProblems === 'chronic') {
+        const problem = await upsertProblemInTx(tx, ctx.tenantId as string, current.patient_id, {
+          description: String(input.description),
+          status: input.addToProblems,
+          conditionId: (input.conditionId as string | undefined) ?? null,
+          sourceEncounterId: id,
+        });
+        await this.audit.record(tx, ctx, {
+          category: 'mutation',
+          action: 'patient.problem.add',
+          entitySchema: 'registry',
+          entityTable: 'patient_problems',
+          entityId: problem.id,
+          after: { status: input.addToProblems, fromDiagnosis: diagnosisId },
+        });
+      }
     });
     return this.get(ctx, id);
   }

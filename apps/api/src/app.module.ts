@@ -28,6 +28,8 @@ import { EncountersService } from './modules/clinical/encounters.service';
 import { PrescriptionsController } from './modules/clinical/prescriptions.controller';
 import { PrescriptionsService } from './modules/clinical/prescriptions.service';
 import { TimelineService } from './modules/clinical/timeline.service';
+import { ChartingController } from './modules/clinical/charting.controller';
+import { ChartingService } from './modules/clinical/charting.service';
 import { ExamsController } from './modules/lab/exams.controller';
 import { ExamsService } from './modules/lab/exams.service';
 import { ImmunizationController } from './modules/immunization/immunization.controller';
@@ -65,6 +67,7 @@ export class CoreModule {}
     AppointmentsController,
     EncountersController,
     PrescriptionsController,
+    ChartingController,
     ExamsController,
     ImmunizationController,
     DocumentsController,
@@ -85,6 +88,7 @@ export class CoreModule {}
     EncountersService,
     PrescriptionsService,
     TimelineService,
+    ChartingService,
     ExamsService,
     ImmunizationService,
     DocumentsService,

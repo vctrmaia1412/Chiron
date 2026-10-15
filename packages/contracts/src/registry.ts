@@ -173,11 +173,16 @@ export const patientAlertSchema = z.object({
 
 export const patientProblemSchema = z.object({
   id: uuidSchema,
+  patientId: uuidSchema,
+  conditionId: uuidSchema.nullable(),
   description: z.string(),
   status: problemStatusSchema,
   onsetAt: isoDateTimeSchema.nullable(),
   resolvedAt: isoDateTimeSchema.nullable(),
+  sourceEncounterId: uuidSchema.nullable(),
+  createdAt: isoDateTimeSchema,
 });
+export type PatientProblem = z.infer<typeof patientProblemSchema>;
 
 export const patientSchema = z.object({
   id: uuidSchema,

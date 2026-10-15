@@ -215,6 +215,7 @@ export class TimelineService {
         class: string;
         status: string;
         service_name: string | null;
+        service_category: string | null;
         professional_id: string | null;
         professional_name: string | null;
         appointment_id: string | null;
@@ -232,7 +233,7 @@ export class TimelineService {
         guardian_name: string | null;
       }>(
         `SELECT e.id, e.number::text AS number, e.facility_id, e.class, e.status,
-                sc.name AS service_name, pr.id AS professional_id, pr.name AS professional_name,
+                sc.name AS service_name, sc.category AS service_category, pr.id AS professional_id, pr.name AS professional_name,
                 e.appointment_id, e.arrived_at, e.started_at, e.ended_at, e.chief_complaint,
                 e.primary_diagnosis_summary, e.disposition, e.created_at,
                 p.name AS patient_name, s.name_pt AS species_name, b.name AS breed_name,
@@ -349,6 +350,7 @@ export class TimelineService {
             class: e.class as never,
             status: e.status as never,
             serviceName: e.service_name,
+            serviceCategory: e.service_category,
             attendingProfessional: e.professional_id
               ? { id: e.professional_id, name: e.professional_name ?? '' }
               : null,
