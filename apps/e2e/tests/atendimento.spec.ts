@@ -112,7 +112,7 @@ test('consulta completa: registro, diagnóstico, receita assinada, vacina e fina
   await page.goto(`/atendimentos/${next.id}`);
   await settle(page);
   await expect(page.getByText(/1 problema/).first()).toBeVisible();
-  await expect(page.getByText(name).first()).toBeVisible();
+  await expect(page.getByText(name).locator('visible=true').first()).toBeVisible();
 });
 
 test('celular: sai do atendimento, consulta e volta sem perder nada', async ({ page, api }) => {

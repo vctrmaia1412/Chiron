@@ -15,11 +15,17 @@ function todayIso(offsetDays = 0): string {
   return local.toISOString().slice(0, 10);
 }
 
-/** Horário de hoje mais à frente, com minutos "quebrados" para não colidir com o seed. */
+/**
+ * Horário de hoje mais à frente, com minutos "quebrados" para não colidir com
+ * o seed. Perto da meia-noite fica no fim do dia de hoje, nunca amanhã: a
+ * agenda abre no dia de hoje.
+ */
 function laterToday(minutesAhead: number): { date: string; time: string; iso: string } {
-  const at = new Date(Date.now() + minutesAhead * 60_000);
+  let at = new Date(Date.now() + minutesAhead * 60_000);
+  const lastSlot = new Date();
+  lastSlot.setHours(23, 50, 0, 0);
+  if (at > lastSlot) at = new Date(Math.max(Date.now() + 60_000, lastSlot.getTime() - (minutesAhead % 60) * 60_000));
   at.setSeconds(0, 0);
-  if (at.getDate() !== new Date().getDate()) at.setHours(23, 30);
   const hh = String(at.getHours()).padStart(2, '0');
   const mm = String(at.getMinutes()).padStart(2, '0');
   return { date: todayIso(), time: `${hh}:${mm}`, iso: at.toISOString() };
@@ -86,7 +92,8 @@ test('cliente novo: cadastra tutor e animal juntos e agenda pela ficha', async (
   await page.getByRole('link', { name: 'Agendar' }).click();
   const form = page.getByRole('dialog');
   await expect(form.getByText(animal).first()).toBeVisible();
-  await form.getByLabel('Serviço').selectOption({ label: 'Consulta clínica' });
+  // consulta é o serviço mais comum e já vem escolhida
+  await expect(form.getByLabel('Serviço').locator('option:checked')).toHaveText(/Consulta clínica/);
   await form.getByLabel('Profissional').selectOption({ index: 1 });
   await form.getByLabel('Data').fill(todayIso(1));
   await form.getByLabel('Horário').fill('16:47');

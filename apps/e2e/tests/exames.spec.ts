@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { expect, expectNoHorizontalOverflow, settle, test, uniqueName, type Api } from './fixtures';
 
 /**
@@ -9,6 +10,14 @@ test.use({ role: 'vet' });
 
 /** PDF mínimo: o servidor confere o começo do arquivo contra o tipo declarado. */
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<< /Type /Catalog >>endobj\ntrailer<< /Root 1 0 R >>\n%%EOF\n');
+
+/** Com um pedido só, a tela já abre o pedido expandido: tocar de novo fecharia. */
+async function openOrder(page: Page) {
+  const row = page.getByRole('button', { name: /pedido nº/ }).first();
+  await expect(row).toBeVisible();
+  if ((await row.getAttribute('aria-expanded')) !== 'true') await row.click();
+  await expect(row).toHaveAttribute('aria-expanded', 'true');
+}
 
 async function patientWithOrder(api: Api) {
   const species = await api.get<{ items: Array<{ id: string; code: string }> }>('/species');
@@ -40,7 +49,7 @@ test('resultado com laudo em PDF, revisão e retificação', async ({ page, api 
   await expect(page.locator('main h1').first()).toContainText(`Exames de ${name}`);
   await expectNoHorizontalOverflow(page);
 
-  await page.getByRole('button', { name: /pedido nº/ }).first().click();
+  await openOrder(page);
   await page.getByRole('button', { name: 'Lançar resultado' }).click();
   const sheet = page.getByRole('dialog');
   await sheet.getByLabel('Conclusão').fill('Anemia discreta, sem alteração de plaquetas.');
@@ -78,7 +87,7 @@ test('pedido sem resultado é cancelado com motivo', async ({ page, api }) => {
 
   await page.goto(`/exames?pacienteId=${patientId}`);
   await settle(page);
-  await page.getByRole('button', { name: /pedido nº/ }).first().click();
+  await openOrder(page);
   await page.getByRole('button', { name: 'Cancelar pedido' }).click();
   const sheet = page.getByRole('dialog');
   await sheet.getByLabel('Motivo').fill('Pedido em duplicidade');
