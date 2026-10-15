@@ -4,30 +4,47 @@ import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarPlus, Phone, Search, Syringe } from 'lucide-react';
-import type { DueItem, Immunization, PreventiveTreatment } from '@chiron/contracts';
+import { CalendarPlus, Phone, Plus, Search, Syringe } from 'lucide-react';
+import type { DueItem, Immunization, PreventiveKind, PreventiveTreatment } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
-import { addDays, formatDate, formatDateTime, formatPhone, toIsoDate, whatsappLink } from '@/lib/format';
+import { addDays, formatDate, formatPhone, toIsoDate, whatsappLink } from '@/lib/format';
+import { useSession } from '@/lib/session';
 import { Badge, Card, CardHeader, EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
+import { Sheet } from '@/components/ui/sheet';
 import { Tabs } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/field';
+import { MountWhenOpen } from '@/components/ui/mount-when-open';
+import { PatientPicker, type PatientPickerValue } from '@/components/patients/patient-picker';
+import { AppliedRecordList, mergeRecords } from '@/components/immunization/applied-records';
+import { PreventiveSheet, VaccineSheet } from '@/components/immunization/immunization-sheets';
 
 const PAGE = 20;
 
 function plain(value: string) {
   return value
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase();
 }
 
+/** O que abrir depois de escolher o paciente (ou tocar numa pendência). */
+type RegisterTarget =
+  | { type: 'vaccine'; patientId: string; vaccineName?: string }
+  | { type: 'preventive'; patientId: string; kind?: PreventiveKind; productName?: string };
+
 function ImmunizationsView() {
   const params = useSearchParams();
+  const { can } = useSession();
   const [tab, setTab] = useState<'pendentes' | 'aplicadas'>(params.get('aplicadas') ? 'aplicadas' : 'pendentes');
   const [horizon, setHorizon] = useState(30);
   const [search, setSearch] = useState('');
   const [visible, setVisible] = useState(PAGE);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [target, setTarget] = useState<RegisterTarget | null>(null);
+
+  const canVaccine = can('immunization:apply');
+  const canPreventive = can('preventive:record');
 
   const due = useQuery({
     queryKey: ['immunizations', 'due', horizon],
@@ -51,12 +68,39 @@ function ImmunizationsView() {
     (item) =>
       !query || plain(item.patientName).includes(query) || plain(item.guardianName ?? '').includes(query),
   );
+  const appliedRecords = mergeRecords(applied.data);
+
+  /** A próxima dose da pendência: mesma vacina ou mesmo produto, já no tipo certo. */
+  function registerFrom(item: DueItem) {
+    setTarget(
+      item.kind === 'vaccine'
+        ? { type: 'vaccine', patientId: item.patientId, vaccineName: item.productName }
+        : {
+            type: 'preventive',
+            patientId: item.patientId,
+            kind: item.preventiveKind ?? undefined,
+            productName: item.productName,
+          },
+    );
+  }
+
+  function closeTarget(open: boolean) {
+    if (!open) setTarget(null);
+  }
 
   return (
     <>
       <PageHeader
         title="Vacinas e preventivos"
         description="Pendências de próxima dose e histórico de aplicações."
+        actions={
+          canVaccine || canPreventive ? (
+            <Button size="sm" onClick={() => setPickOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Registrar aplicação
+            </Button>
+          ) : undefined
+        }
       />
 
       <Tabs
@@ -130,9 +174,11 @@ function ImmunizationsView() {
                   item.guardianPhone,
                   `Olá! Aqui é da clínica. A ${item.productName} do ${item.patientName} está prevista para ${formatDate(item.dueAt)}. Podemos agendar?`,
                 );
+                const canRegister = item.kind === 'vaccine' ? canVaccine : canPreventive;
                 return (
                   <li key={`${item.kind}-${item.id}`} className="px-4 py-3">
-                    <div className="flex items-start justify-between gap-3">
+                    {/* No celular as ações descem para baixo do nome: lado a lado, o nome do paciente sumia. */}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <Link
@@ -153,12 +199,24 @@ function ImmunizationsView() {
                           </p>
                         )}
                       </div>
-                      <div className="flex shrink-0 gap-1">
+                      <div className="flex shrink-0 flex-wrap gap-1.5">
+                        {canRegister && (
+                          <Button
+                            size="sm"
+                            variant="subtle"
+                            className="h-10"
+                            onClick={() => registerFrom(item)}
+                            aria-label={`Registrar aplicação de ${item.productName} em ${item.patientName}`}
+                          >
+                            <Syringe className="h-4 w-4" />
+                            Registrar aplicação
+                          </Button>
+                        )}
                         <Link
                           href={`/agenda?novo=1&pacienteId=${item.patientId}`}
                           aria-label="Agendar aplicação"
                           title="Agendar aplicação"
-                          className="flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-[var(--border-strong)] text-[var(--ink-2)]"
+                          className="flex h-10 w-10 items-center justify-center rounded-[var(--radius)] border border-[var(--border-strong)] text-[var(--ink-2)]"
                         >
                           <CalendarPlus className="h-4 w-4" />
                         </Link>
@@ -166,7 +224,7 @@ function ImmunizationsView() {
                           <a
                             href={`tel:${item.guardianPhone.replace(/\D/g, '')}`}
                             aria-label="Ligar"
-                            className="flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-[var(--border-strong)] text-[var(--ink-2)]"
+                            className="flex h-10 w-10 items-center justify-center rounded-[var(--radius)] border border-[var(--border-strong)] text-[var(--ink-2)]"
                           >
                             <Phone className="h-4 w-4" />
                           </a>
@@ -176,7 +234,7 @@ function ImmunizationsView() {
                             href={wa}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex h-9 items-center rounded-[var(--radius)] border border-[var(--border-strong)] px-2.5 text-[12.5px] font-medium text-[var(--ink-2)]"
+                            className="flex h-10 items-center rounded-[var(--radius)] border border-[var(--border-strong)] px-2.5 text-[12.5px] font-medium text-[var(--ink-2)]"
                           >
                             Avisar
                           </a>
@@ -204,54 +262,99 @@ function ImmunizationsView() {
             <ErrorState message={errorMessage(applied.error)} onRetry={() => void applied.refetch()} />
           ) : applied.isLoading ? (
             <ListSkeleton rows={5} />
-          ) : (applied.data?.immunizations ?? []).length === 0 &&
-            (applied.data?.preventives ?? []).length === 0 ? (
+          ) : appliedRecords.length === 0 ? (
             <EmptyState icon={<Syringe className="h-7 w-7" />} title="Nenhuma aplicação registrada" />
           ) : (
-            <ul className="divide-y divide-[var(--border)]">
-              {(applied.data?.immunizations ?? []).map((item) => (
-                <li key={item.id} className="px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/pacientes/${item.patientId}`}
-                      className="text-[14.5px] font-medium text-[var(--ink)] hover:text-[var(--brand)]"
-                    >
-                      {item.patientName ?? 'Paciente'}
-                    </Link>
-                    <span className="text-[13px] text-[var(--ink-2)]">{item.vaccineName}</span>
-                    {item.status !== 'completed' && <Badge tone="muted">Cancelada</Badge>}
-                  </div>
-                  <p className="text-[12.5px] text-[var(--ink-3)]">
-                    {[formatDateTime(item.administeredAt), item.lotNumber ? `lote ${item.lotNumber}` : null, item.professionalName]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
-                </li>
-              ))}
-              {(applied.data?.preventives ?? []).map((item) => (
-                <li key={item.id} className="px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/pacientes/${item.patientId}`}
-                      className="text-[14.5px] font-medium text-[var(--ink)] hover:text-[var(--brand)]"
-                    >
-                      {item.patientName ?? 'Paciente'}
-                    </Link>
-                    <span className="text-[13px] text-[var(--ink-2)]">{item.productName}</span>
-                    <Badge tone="neutral">Preventivo</Badge>
-                  </div>
-                  <p className="text-[12.5px] text-[var(--ink-3)]">
-                    {[formatDateTime(item.administeredAt), item.doseText, item.professionalName]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <AppliedRecordList records={appliedRecords} showPatient />
           )}
         </Card>
       )}
+
+      <PickPatientSheet
+        open={pickOpen}
+        onOpenChange={setPickOpen}
+        canVaccine={canVaccine}
+        canPreventive={canPreventive}
+        onPick={(next) => {
+          setPickOpen(false);
+          setTarget(next);
+        }}
+      />
+      {target?.type === 'vaccine' && (
+        <VaccineSheet
+          open
+          onOpenChange={closeTarget}
+          patientId={target.patientId}
+          initialVaccineName={target.vaccineName}
+        />
+      )}
+      {target?.type === 'preventive' && (
+        <PreventiveSheet
+          open
+          onOpenChange={closeTarget}
+          patientId={target.patientId}
+          initialKind={target.kind}
+          initialProductName={target.productName}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * Atalho do balcão: o tutor chega para o vermífugo ou traz a carteira de
+ * outra clínica. Escolhe o animal e cai direto no registro, sem atendimento.
+ */
+function PickPatientSheetContent({
+  open,
+  onOpenChange,
+  canVaccine,
+  canPreventive,
+  onPick,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  canVaccine: boolean;
+  canPreventive: boolean;
+  onPick: (target: RegisterTarget) => void;
+}) {
+  const [patient, setPatient] = useState<PatientPickerValue | null>(null);
+
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Registrar aplicação"
+      description="Dose aplicada fora da consulta ou trazida na carteira do tutor."
+      size="sm"
+    >
+      <div className="space-y-4">
+        <PatientPicker value={patient} onChange={setPatient} />
+        {patient && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {canVaccine && (
+              <Button onClick={() => onPick({ type: 'vaccine', patientId: patient.id })}>
+                <Syringe className="h-4 w-4" />
+                Vacina
+              </Button>
+            )}
+            {canPreventive && (
+              <Button variant="secondary" onClick={() => onPick({ type: 'preventive', patientId: patient.id })}>
+                Vermífugo ou antipulgas
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+function PickPatientSheet(props: React.ComponentProps<typeof PickPatientSheetContent>) {
+  return (
+    <MountWhenOpen open={props.open}>
+      <PickPatientSheetContent {...props} />
+    </MountWhenOpen>
   );
 }
 

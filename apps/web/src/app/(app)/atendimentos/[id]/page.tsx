@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   FileText,
   FlaskConical,
+  HeartOff,
   History,
   PawPrint,
   Pause,
@@ -670,7 +671,7 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
               )}
               {can('death:record') && patient?.status === 'active' && (
                 <MenuButton
-                  icon={X}
+                  icon={HeartOff}
                   label="Registrar óbito"
                   onClick={() => {
                     setSheet(null);

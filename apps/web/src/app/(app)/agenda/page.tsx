@@ -13,6 +13,7 @@ import {
   ChevronRight,
   LogIn,
   Plus,
+  Search,
   XCircle,
 } from 'lucide-react';
 import type { Appointment, FollowUp } from '@chiron/contracts';
@@ -24,9 +25,10 @@ import { addDays, endOfDay, formatDate, formatTime, formatWeekday, isToday, star
 import { APPOINTMENT_STATUS, statusFor } from '@/lib/labels';
 import { useProfessionals } from '@/lib/catalog';
 import { useSession } from '@/lib/session';
+import { useDebounced } from '@/lib/use-debounced';
 import { Badge, Card, CardHeader, EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
-import { Select } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/field';
 import { FilterChips } from '@/components/ui/tabs';
 import { AppointmentFormSheet } from '@/components/scheduling/appointment-form';
 import { CheckInSheet } from '@/components/scheduling/check-in-sheet';
@@ -494,6 +496,8 @@ function parseIsoDate(value: string | null): Date | null {
   return year && month && date ? new Date(year, month - 1, date) : null;
 }
 
+const FOLLOW_UP_PAGE = 20;
+
 function FollowUpsCard({
   open,
   onOpen,
@@ -504,25 +508,46 @@ function FollowUpsCard({
   onSchedule: (followUp: FollowUp) => void;
 }) {
   const { can } = useSession();
+  const [search, setSearch] = useState('');
+  const [limit, setLimit] = useState(FOLLOW_UP_PAGE);
+  const q = useDebounced(search.trim(), 300);
   const { data, isLoading } = useQuery({
-    queryKey: ['follow-ups'],
-    queryFn: () => api.get<{ items: FollowUp[] }>('/follow-ups', { limit: 20 }),
+    queryKey: ['follow-ups', q, limit],
+    queryFn: () => api.get<{ items: FollowUp[] }>('/follow-ups', { limit, q: q || undefined }),
     enabled: can('appointment:read'),
+    placeholderData: (previous) => previous,
   });
 
   const items = data?.items ?? [];
+  const mayHaveMore = items.length >= limit && limit < 100;
 
   // No celular o cartão aparece quando há retorno pendente, abaixo da agenda.
   return (
-    <Card className={open || items.length > 0 ? '' : 'hidden lg:block'}>
+    <Card className={open || items.length > 0 || q ? '' : 'hidden lg:block'}>
       <CardHeader
         title="Retornos a agendar"
-        description="Atendimentos que pediram reavaliação e ainda não têm horário marcado."
+        description="Atendimentos que pediram reavaliação e ainda não têm horário marcado. Os mais atrasados primeiro."
       />
+      <div className="relative border-b border-[var(--border)] px-4 py-2.5">
+        <Search className="pointer-events-none absolute left-7 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-3)]" />
+        <Input
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setLimit(FOLLOW_UP_PAGE);
+          }}
+          placeholder="Buscar paciente ou tutor"
+          aria-label="Buscar retorno por paciente ou tutor"
+          className="pl-9"
+        />
+      </div>
       {isLoading ? (
         <ListSkeleton rows={3} />
       ) : items.length === 0 ? (
-        <EmptyState title="Nenhum retorno pendente" description="Todos os retornos indicados já foram agendados." />
+        <EmptyState
+          title={q ? `Nenhum retorno para "${q}"` : 'Nenhum retorno pendente'}
+          description={q ? undefined : 'Todos os retornos indicados já foram agendados.'}
+        />
       ) : (
         <ul className="divide-y divide-[var(--border)]">
           {items.map((followUp) => (
@@ -555,6 +580,13 @@ function FollowUpsCard({
             </li>
           ))}
         </ul>
+      )}
+      {mayHaveMore && (
+        <div className="border-t border-[var(--border)] p-3">
+          <Button variant="secondary" block onClick={() => setLimit((current) => Math.min(100, current + FOLLOW_UP_PAGE))}>
+            Mostrar mais
+          </Button>
+        </div>
       )}
       <button type="button" onClick={onOpen} className="sr-only">
         Mostrar retornos

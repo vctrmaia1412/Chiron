@@ -1,5 +1,4 @@
-import type { Page } from '@playwright/test';
-import { expect, expectNoHorizontalOverflow, isMobile, settle, test, uniqueName, type Api } from './fixtures';
+import { expect, expectNoHorizontalOverflow, isMobile, settle, test, uniqueName, visibleButton, type Api } from './fixtures';
 
 /**
  * A consulta inteira pelo veterinário, numa ficha nova criada pelo teste:
@@ -28,11 +27,6 @@ async function newEncounter(api: Api, complaint: string) {
     chiefComplaint: complaint,
   });
   return { name, patientId: patient.id, encounterId: encounter.id };
-}
-
-/** O botão que estiver à vista: barra inferior no celular, cabeçalho no computador. */
-function visibleButton(page: Page, name: string) {
-  return page.getByRole('button', { name, exact: true }).locator('visible=true').first();
 }
 
 test('consulta completa: registro, diagnóstico, receita assinada, vacina e finalização', async ({ page, api }) => {

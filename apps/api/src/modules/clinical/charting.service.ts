@@ -424,11 +424,11 @@ export class ChartingService {
            UNION ALL
            SELECT 'preventive' AS kind, t.product_name AS name, t.next_due_at AS due_at
              FROM immunization.preventive_treatments t
-            WHERE t.tenant_id = $1 AND t.patient_id = $2 AND t.next_due_at IS NOT NULL
+            WHERE t.tenant_id = $1 AND t.patient_id = $2 AND t.status = 'completed' AND t.next_due_at IS NOT NULL
               AND NOT EXISTS (
                 SELECT 1 FROM immunization.preventive_treatments later
                  WHERE later.tenant_id = t.tenant_id AND later.patient_id = t.patient_id
-                   AND lower(later.product_name) = lower(t.product_name)
+                   AND lower(later.product_name) = lower(t.product_name) AND later.status = 'completed'
                    AND later.administered_at > t.administered_at)
          ) due
          WHERE due_at <= CURRENT_DATE + 30
@@ -688,6 +688,7 @@ export class ChartingService {
              SELECT i.manufacturer, i.lot_number, i.expires_at
                FROM immunization.immunizations i
               WHERE i.tenant_id = $1 AND i.status = 'completed' AND i.lot_number IS NOT NULL
+                AND NOT i.administered_elsewhere -- lote de outra clínica não é o frasco em uso aqui
                 AND (i.protocol_id = pr.id OR lower(i.vaccine_name) = lower(pr.name))
                 AND (i.expires_at IS NULL OR i.expires_at >= CURRENT_DATE)
               ORDER BY i.administered_at DESC

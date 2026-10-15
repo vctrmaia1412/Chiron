@@ -34,7 +34,8 @@ export function GuardianPicker({
 
   const { data, isFetching } = useQuery({
     queryKey: ['guardians', 'picker', debounced],
-    queryFn: () => api.get<{ items: Guardian[] }>('/guardians', { q: debounced, limit: 8 }),
+    // Tutor inativo não recebe vínculo novo: nem aparece para escolher.
+    queryFn: () => api.get<{ items: Guardian[] }>('/guardians', { q: debounced, limit: 8, status: 'active' }),
     enabled: focused && debounced.length >= 2,
     staleTime: 15_000,
   });

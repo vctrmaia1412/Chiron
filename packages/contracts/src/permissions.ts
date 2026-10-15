@@ -215,8 +215,8 @@ export const PERMISSIONS = [
   // -------------------------------------------------------- immunization
   p('immunization', 'immunization:read', 'Ver vacinas e preventivos'),
   p('immunization', 'immunization:apply', 'Aplicar vacina'),
-  p('immunization', 'immunization:update', 'Editar registro de vacina'),
-  p('immunization', 'immunization:cancel', 'Cancelar registro de vacina'),
+  p('immunization', 'immunization:update', 'Corrigir registro de vacina ou preventivo'),
+  p('immunization', 'immunization:cancel', 'Cancelar registro de vacina ou preventivo'),
   p('immunization', 'preventive:record', 'Registrar vermífugo ou antiparasitário'),
   p('immunization', 'protocol:manage', 'Gerenciar protocolos vacinais'),
 

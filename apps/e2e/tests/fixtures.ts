@@ -140,3 +140,8 @@ export function uniqueName(prefix: string): string {
   const stamp = Date.now().toString(36).slice(-5).toUpperCase();
   return `${prefix} ${stamp}`;
 }
+
+/** O botão que estiver à vista: barra inferior no celular, cabeçalho no computador. */
+export function visibleButton(page: Page, name: string) {
+  return page.getByRole('button', { name, exact: true }).locator('visible=true').first();
+}

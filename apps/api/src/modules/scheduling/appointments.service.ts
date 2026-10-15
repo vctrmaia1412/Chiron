@@ -610,7 +610,7 @@ export class AppointmentsService {
   }
 
   /** Retornos indicados na finalização e ainda sem agendamento. */
-  async listFollowUps(ctx: RequestContext, params: { dueUntil?: string; limit: number }) {
+  async listFollowUps(ctx: RequestContext, params: { dueUntil?: string; q?: string; limit: number }) {
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       const { rows } = await tx.query(
         `SELECT e.id AS "encounterId", e.patient_id AS "patientId", p.name AS "patientName",
@@ -632,9 +632,10 @@ export class AppointmentsService {
             AND e.follow_up_appointment_id IS NULL
             AND p.status = 'active'
             AND ($2::date IS NULL OR e.follow_up_due_at <= $2)
+            AND ($4::text IS NULL OR p.name ILIKE '%' || $4 || '%' OR g.name ILIKE '%' || $4 || '%')
           ORDER BY e.follow_up_due_at
           LIMIT $3`,
-        [ctx.tenantId, params.dueUntil ?? null, params.limit],
+        [ctx.tenantId, params.dueUntil ?? null, params.limit, params.q || null],
       );
       return { items: rows };
     });

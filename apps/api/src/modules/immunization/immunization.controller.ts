@@ -1,10 +1,15 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { z } from 'zod';
 import {
+  cancelImmunizationRecordSchema,
   createImmunizationSchema,
   createPreventiveTreatmentSchema,
-  isoDateSchema,
+  updateImmunizationSchema,
+  updatePreventiveTreatmentSchema,
+  type CancelImmunizationRecord,
   type CreateImmunization,
+  type CreatePreventiveTreatment,
+  type UpdateImmunization,
+  type UpdatePreventiveTreatment,
 } from '@chiron/contracts';
 import { ImmunizationService } from './immunization.service';
 import { Authorize } from '../../auth/authorize.decorator';
@@ -17,14 +22,11 @@ function ctxOf(req: AuthedRequest) {
   return req.ctx;
 }
 
-const updateSchema = z.object({
-  nextDueAt: isoDateSchema.nullish(),
-  reactionNotes: z.string().trim().max(1000).nullish(),
-  lotNumber: z.string().trim().max(60).nullish(),
-});
-
-const cancelSchema = z.object({ reason: z.string().trim().min(3).max(300) });
-
+/**
+ * Corrigir e cancelar preventivo usam as mesmas permissões da vacina: o
+ * módulo é um só e quem pode desfazer registro clínico é o mesmo papel.
+ * `preventive:record` continua só registrando (recepção vende no balcão).
+ */
 @Controller('immunizations')
 export class ImmunizationController {
   constructor(private readonly immunization: ImmunizationService) {}
@@ -56,6 +58,41 @@ export class ImmunizationController {
     return this.immunization.apply(ctxOf(req), body);
   }
 
+  @Post('preventives')
+  @Authorize('immunization', 'preventive:record')
+  preventive(
+    @Req() req: AuthedRequest,
+    @Body(zBody(createPreventiveTreatmentSchema)) body: CreatePreventiveTreatment,
+  ) {
+    return this.immunization.recordPreventive(ctxOf(req), body);
+  }
+
+  @Get('preventives/:id')
+  @Authorize('immunization', 'immunization:read')
+  getPreventive(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.immunization.getPreventive(ctxOf(req), id);
+  }
+
+  @Patch('preventives/:id')
+  @Authorize('immunization', 'immunization:update')
+  updatePreventive(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body(zBody(updatePreventiveTreatmentSchema)) body: UpdatePreventiveTreatment,
+  ) {
+    return this.immunization.updatePreventive(ctxOf(req), id, body);
+  }
+
+  @Post('preventives/:id/cancel')
+  @Authorize('immunization', 'immunization:cancel')
+  cancelPreventive(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body(zBody(cancelImmunizationRecordSchema)) body: CancelImmunizationRecord,
+  ) {
+    return this.immunization.cancelPreventive(ctxOf(req), id, body.reason);
+  }
+
   @Get(':id')
   @Authorize('immunization', 'immunization:read')
   get(@Req() req: AuthedRequest, @Param('id') id: string) {
@@ -67,23 +104,18 @@ export class ImmunizationController {
   update(
     @Req() req: AuthedRequest,
     @Param('id') id: string,
-    @Body(zBody(updateSchema)) body: z.infer<typeof updateSchema>,
+    @Body(zBody(updateImmunizationSchema)) body: UpdateImmunization,
   ) {
     return this.immunization.updateImmunization(ctxOf(req), id, body);
   }
 
   @Post(':id/cancel')
   @Authorize('immunization', 'immunization:cancel')
-  cancel(@Req() req: AuthedRequest, @Param('id') id: string, @Body(zBody(cancelSchema)) body: { reason: string }) {
-    return this.immunization.cancelImmunization(ctxOf(req), id, body.reason);
-  }
-
-  @Post('preventives')
-  @Authorize('immunization', 'preventive:record')
-  preventive(
+  cancel(
     @Req() req: AuthedRequest,
-    @Body(zBody(createPreventiveTreatmentSchema)) body: z.infer<typeof createPreventiveTreatmentSchema>,
+    @Param('id') id: string,
+    @Body(zBody(cancelImmunizationRecordSchema)) body: CancelImmunizationRecord,
   ) {
-    return this.immunization.recordPreventive(ctxOf(req), body);
+    return this.immunization.cancelImmunization(ctxOf(req), id, body.reason);
   }
 }

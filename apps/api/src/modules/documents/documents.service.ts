@@ -597,7 +597,7 @@ export class DocumentsService {
               WHERE tenant_id = $1 AND patient_id = $2 AND status = 'completed'
              UNION ALL
              SELECT product_name AS name, administered_at, lot_number FROM immunization.preventive_treatments
-              WHERE tenant_id = $1 AND patient_id = $2
+              WHERE tenant_id = $1 AND patient_id = $2 AND status = 'completed'
              ORDER BY administered_at DESC LIMIT 60`,
             [ctx.tenantId, patientId],
           );

@@ -45,6 +45,32 @@ function initialDrafts(notes: EncounterNote[]): Drafts {
 }
 
 /**
+ * Cópia de segurança no próprio aparelho do que ainda não chegou ao servidor.
+ * Wi-Fi de clínica cai; aba fecha sem querer. O texto da consulta não pode
+ * depender da rede no instante em que foi digitado.
+ */
+function backupKey(encounterId: string): string {
+  return `chiron:rascunho:${encounterId}`;
+}
+
+function readBackup(encounterId: string): Partial<Drafts> {
+  try {
+    return JSON.parse(window.localStorage.getItem(backupKey(encounterId)) ?? '{}') as Partial<Drafts>;
+  } catch {
+    return {};
+  }
+}
+
+function writeBackup(encounterId: string, unsaved: Partial<Drafts>): void {
+  try {
+    if (Object.keys(unsaved).length > 0) window.localStorage.setItem(backupKey(encounterId), JSON.stringify(unsaved));
+    else window.localStorage.removeItem(backupKey(encounterId));
+  } catch {
+    // navegador sem armazenamento local (aba anônima restrita): segue só com o servidor
+  }
+}
+
+/**
  * O registro clínico como um documento só, dividido em seções leves. Nada é
  * obrigatório aqui: modelos, atalhos com barra, exame físico normal em um
  * toque e ditado existem para o veterinário escrever menos, e o indicador de
@@ -93,6 +119,19 @@ export function NoteEditor({
   const [activeSection, setActiveSection] = useState<ChartingSection>('history');
   const [examOpen, setExamOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  // Texto que ficou só no aparelho da última vez (rede caiu, aba fechou):
+  // aparece como oferta de recuperar, nunca substitui sozinho o do servidor.
+  const [recoverable, setRecoverable] = useState<Partial<Drafts>>(() => {
+    if (typeof window === 'undefined') return {};
+    const backup = readBackup(encounterId);
+    const server = initialDrafts(notes);
+    const result: Partial<Drafts> = {};
+    for (const section of SECTIONS) {
+      const text = backup[section.kind];
+      if (text?.trim() && text.trim() !== server[section.kind].trim()) result[section.kind] = text;
+    }
+    return result;
+  });
 
   const fields = useRef<Partial<Record<ChartingSection, SmartTextareaHandle | null>>>({});
   const timers = useRef<Partial<Record<ChartingSection, ReturnType<typeof setTimeout>>>>({});
@@ -116,6 +155,18 @@ export function NoteEditor({
     return saved.current;
   }
 
+  /** Guarda no aparelho as seções que diferem do que o servidor confirmou. */
+  function backupUnsaved() {
+    const current = currentDrafts();
+    const confirmed = savedDrafts();
+    const unsaved: Partial<Drafts> = {};
+    for (const section of SECTIONS) {
+      if (current[section.kind].trim() !== confirmed[section.kind].trim()) unsaved[section.kind] = current[section.kind];
+    }
+    writeBackup(encounterId, unsaved);
+    return Object.keys(unsaved).length > 0;
+  }
+
   function markFailed(kind: ChartingSection, failedNow: boolean) {
     const next = new Set(failedKinds.current);
     if (failedNow) next.add(kind);
@@ -131,6 +182,17 @@ export function NoteEditor({
     };
   }, []);
 
+  // Fechar a aba com texto ainda não gravado: o navegador pergunta antes.
+  useEffect(() => {
+    function warn(event: BeforeUnloadEvent) {
+      if (pending.current > 0 || failedKinds.current.size > 0 || backupUnsaved()) event.preventDefault();
+    }
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+    // backupUnsaved só lê refs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const persist = useCallback(
     (kind: ChartingSection, body: string) => {
       if (body.trim() === savedDrafts()[kind].trim()) return;
@@ -143,6 +205,7 @@ export function NoteEditor({
         .then(() => api.post(`/encounters/${encounterId}/notes`, { kind, body }))
         .then(() => {
           saved.current = { ...savedDrafts(), [kind]: body };
+          backupUnsaved();
           if (failedKinds.current.has(kind)) markFailed(kind, false);
         })
         .catch((error: unknown) => {
@@ -183,6 +246,7 @@ export function NoteEditor({
       if (value === current[kind]) return;
       latest.current = { ...current, [kind]: value };
       setDrafts(latest.current);
+      backupUnsaved();
       schedule(kind, value, delay);
     },
     // currentDrafts só lê refs; as dependências reais são estas
@@ -298,6 +362,48 @@ export function NoteEditor({
               {note.body}
             </p>
           ))}
+        </div>
+      )}
+
+      {Object.keys(recoverable).length > 0 && (
+        <div
+          role="alert"
+          className="rounded-[var(--radius)] border border-[var(--warning)]/30 bg-[var(--warning-soft)] px-3 py-2.5"
+        >
+          <p className="text-[13.5px] font-medium text-[var(--ink)]">
+            Há texto deste atendimento que ficou só neste aparelho e não chegou ao servidor.
+          </p>
+          <p className="mt-0.5 text-[12.5px] text-[var(--ink-2)]">
+            Seções:{' '}
+            {SECTIONS.filter((section) => recoverable[section.kind])
+              .map((section) => section.label)
+              .join(', ')}
+            . Recuperar substitui o texto dessas seções pelo que foi digitado aqui.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => {
+                for (const section of SECTIONS) {
+                  const text = recoverable[section.kind];
+                  if (text) setSection(section.kind, () => text, 300);
+                }
+                setRecoverable({});
+              }}
+            >
+              Recuperar texto
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setRecoverable({});
+                backupUnsaved();
+              }}
+            >
+              Descartar
+            </Button>
+          </div>
         </div>
       )}
 

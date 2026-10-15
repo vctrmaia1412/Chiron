@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { AlertTriangle, PawPrint, Plus, Search } from 'lucide-react';
 import type { PatientListItem } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
@@ -16,6 +16,16 @@ import { Button } from '@/components/ui/button';
 import { Input, Select } from '@/components/ui/field';
 import { FilterChips } from '@/components/ui/tabs';
 import { PatientFormSheet } from '@/components/patients/patient-form';
+
+const PAGE_SIZE = 30;
+
+/** "Inativos" inclui quem foi transferido: os dois saíram da clínica. */
+const STATUS_QUERY: Record<string, string | undefined> = {
+  active: 'active',
+  inactive: 'inactive,transferred',
+  deceased: 'deceased',
+  all: undefined,
+};
 
 function PatientsList() {
   const router = useRouter();
@@ -34,18 +44,22 @@ function PatientsList() {
     return () => clearTimeout(timer);
   }, [term]);
 
-  const { data, isLoading, error, refetch } = useQuery({
+  const { data, isLoading, error, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['patients', { debounced, speciesId, status }],
-    queryFn: () =>
-      api.get<{ items: PatientListItem[] }>('/patients', {
+    queryFn: ({ pageParam }) =>
+      api.get<{ items: PatientListItem[]; nextCursor: string | null }>('/patients', {
         q: debounced || undefined,
         speciesId: speciesId || undefined,
-        status: status === 'all' ? undefined : status,
-        limit: 50,
+        status: STATUS_QUERY[status],
+        limit: PAGE_SIZE,
+        cursor: pageParam,
       }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
   });
 
-  const items = data?.items ?? [];
+  const items = data?.pages.flatMap((page) => page.items) ?? [];
+  const filtered = Boolean(debounced || speciesId) || status !== 'active';
 
   return (
     <>
@@ -103,12 +117,12 @@ function PatientsList() {
         ) : items.length === 0 ? (
           <EmptyState
             icon={<PawPrint className="h-7 w-7" />}
-            title={debounced ? 'Nenhum paciente encontrado' : 'Nenhum paciente cadastrado'}
+            title={filtered ? 'Nenhum paciente encontrado' : 'Nenhum paciente cadastrado'}
             description={
-              debounced ? 'Ajuste a busca ou os filtros.' : 'Cadastre o primeiro paciente para começar.'
+              filtered ? 'Ajuste a busca ou os filtros.' : 'Cadastre o primeiro paciente para começar.'
             }
             action={
-              can('patient:create') && !debounced ? (
+              can('patient:create') && !filtered ? (
                 <Button onClick={() => setFormOpen(true)}>
                   <Plus className="h-4 w-4" />
                   Novo paciente
@@ -171,6 +185,18 @@ function PatientsList() {
           </ul>
         )}
       </Card>
+
+      {hasNextPage && (
+        <Button
+          variant="secondary"
+          block
+          className="mt-3"
+          onClick={() => void fetchNextPage()}
+          loading={isFetchingNextPage}
+        >
+          Carregar mais
+        </Button>
+      )}
 
       <PatientFormSheet
         open={formOpen}

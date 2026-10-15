@@ -122,6 +122,8 @@ export type FollowUp = z.infer<typeof followUpSchema>;
 
 export const listFollowUpsQuerySchema = paginationQuerySchema.extend({
   dueUntil: z.string().optional(),
+  /** Nome do paciente ou do tutor: a lista cresce rápido numa clínica cheia. */
+  q: z.string().trim().max(120).optional(),
   includeScheduled: queryBoolean.default(false),
 });
 

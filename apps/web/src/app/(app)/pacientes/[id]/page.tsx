@@ -10,7 +10,6 @@ import {
   FileText,
   FlaskConical,
   Pencil,
-  Phone,
   Play,
   ScrollText,
   Stethoscope,
@@ -19,13 +18,11 @@ import {
 import { useRouter } from 'next/navigation';
 import type { EncounterDetail, EncounterSummary } from '@chiron/contracts';
 import { PatientSummaryCard } from '@/components/clinical/patient-summary';
-import type { Patient } from '@chiron/contracts';
+import type { Patient, PatientAllergy } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
-import { formatDate, formatDateTime, formatPhone, formatWeight, whatsappLink } from '@/lib/format';
+import { formatDate, formatDateTime, formatWeight } from '@/lib/format';
 import {
   ALERT_KIND,
-  GUARDIAN_ROLE,
-  IDENTIFIER_SCHEME,
   PATIENT_STATUS,
   REPRODUCTIVE_STATUS,
   SEVERITY,
@@ -34,7 +31,7 @@ import {
   statusFor,
 } from '@/lib/labels';
 import { useSession } from '@/lib/session';
-import { Badge, Card, CardHeader, DataRow, EmptyState, ErrorState, PageHeader, Skeleton } from '@/components/ui/primitives';
+import { Badge, Card, CardHeader, DataRow, ErrorState, PageHeader, Skeleton } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
@@ -42,7 +39,13 @@ import { PatientFormSheet } from '@/components/patients/patient-form';
 import { PatientTimeline } from '@/components/patients/patient-timeline';
 import { WeightChart } from '@/components/patients/weight-chart';
 import { DeathSheet } from '@/components/patients/death-sheet';
+import { PatientGuardiansCard } from '@/components/patients/patient-guardians-card';
+import { PatientAlertsCard } from '@/components/patients/patient-alerts-card';
+import { PatientIdentifiersCard } from '@/components/patients/patient-identifiers-card';
+import { PatientInactiveBanner, PatientStatusAction } from '@/components/patients/patient-status';
+import { AllergyStatusSheet } from '@/components/patients/allergy-status-sheet';
 import { GenerateDocumentSheet } from '@/components/documents/generate-sheet';
+import { PatientImmunizationsCard } from '@/components/immunization/patient-immunizations-card';
 
 export default function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -73,6 +76,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
   const [weightOpen, setWeightOpen] = useState(false);
   const [allergyOpen, setAllergyOpen] = useState(false);
   const [deathOpen, setDeathOpen] = useState(false);
+  const [retiringAllergy, setRetiringAllergy] = useState<PatientAllergy | null>(null);
   const [generate, setGenerate] = useState<{ template?: string; fields?: Record<string, string> } | null>(null);
 
   const { data: patient, isLoading, error, refetch } = useQuery({
@@ -179,6 +183,8 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
         }
       />
 
+      <PatientInactiveBanner patient={patient} />
+
       {(activeAlerts.length > 0 || activeAllergies.length > 0 || patient.status === 'deceased') && (
         <div className="mb-4 space-y-2">
           {patient.status === 'deceased' && (
@@ -275,61 +281,11 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
             </div>
           </Card>
 
-          <Card>
-            <CardHeader title="Tutores" />
-            {patient.guardians.length === 0 ? (
-              <EmptyState title="Sem tutor vinculado" description="Vincule um responsável ao paciente." />
-            ) : (
-              <ul className="divide-y divide-[var(--border)]">
-                {patient.guardians.map((link) => {
-                  const wa = whatsappLink(link.guardianPhone);
-                  return (
-                    <li key={link.guardianId} className="px-4 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <Link
-                            href={`/tutores/${link.guardianId}`}
-                            className="block truncate text-[14.5px] font-medium text-[var(--ink)] hover:text-[var(--brand)]"
-                          >
-                            {link.guardianName}
-                          </Link>
-                          <p className="text-[12.5px] text-[var(--ink-3)]">
-                            {labelFor(GUARDIAN_ROLE, link.role)}
-                            {link.isPrimary ? ' · principal' : ''}
-                          </p>
-                          {link.guardianPhone && (
-                            <p className="mt-0.5 text-[13px] text-[var(--ink-2)]">{formatPhone(link.guardianPhone)}</p>
-                          )}
-                        </div>
-                        {link.guardianPhone && (
-                          <div className="flex shrink-0 gap-1">
-                            <a
-                              href={`tel:${link.guardianPhone.replace(/\D/g, '')}`}
-                              aria-label="Ligar"
-                              className="flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-[var(--border-strong)] text-[var(--ink-2)]"
-                            >
-                              <Phone className="h-4 w-4" />
-                            </a>
-                            {wa && (
-                              <a
-                                href={wa}
-                                target="_blank"
-                                rel="noreferrer"
-                                aria-label="WhatsApp"
-                                className="flex h-9 items-center rounded-[var(--radius)] border border-[var(--border-strong)] px-2.5 text-[12.5px] font-medium text-[var(--ink-2)]"
-                              >
-                                WhatsApp
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
+          <PatientGuardiansCard patient={patient} />
+
+          <PatientAlertsCard patient={patient} />
+
+          <PatientIdentifiersCard patient={patient} />
 
           <Card>
             <CardHeader title="Cadastro" />
@@ -345,13 +301,6 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               <DataRow label="Idade" value={patient.ageLabel} />
               <DataRow label="Pelagem" value={patient.colorMarkings} />
               <DataRow label="Código interno" value={patient.internalCode} />
-              {patient.identifiers.map((identifier) => (
-                <DataRow
-                  key={identifier.id}
-                  label={labelFor(IDENTIFIER_SCHEME, identifier.scheme)}
-                  value={<span className="font-mono text-[13px]">{identifier.value}</span>}
-                />
-              ))}
               {Object.entries(patient.attributes ?? {})
                 .filter(([key]) => key !== 'scientificName')
                 .map(([key, value]) => (
@@ -363,6 +312,11 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               <div className="border-t border-[var(--border)] px-4 py-3">
                 <p className="text-[12px] font-semibold uppercase tracking-wider text-[var(--ink-3)]">Observações</p>
                 <p className="mt-1 whitespace-pre-wrap text-[13.5px] text-[var(--ink-2)]">{patient.notes}</p>
+              </div>
+            )}
+            {patient.status === 'active' && can('patient:update') && (
+              <div className="border-t border-[var(--border)] px-4 py-2">
+                <PatientStatusAction patient={patient} />
               </div>
             )}
           </Card>
@@ -398,9 +352,23 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
                           <p className="text-[12.5px] text-[var(--ink-3)]">{allergy.reaction}</p>
                         )}
                       </div>
-                      <Badge tone={allergy.status === 'active' ? severity.tone : 'muted'}>
-                        {allergy.status === 'active' ? severity.label : 'Inativa'}
-                      </Badge>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <Badge tone={allergy.status === 'active' ? severity.tone : 'muted'}>
+                          {allergy.status === 'active' ? severity.label : 'Inativa'}
+                        </Badge>
+                        {/* Tirar da lista ativa é decisão clínica; registrar, qualquer um do cadastro. */}
+                        {allergy.status === 'active' && hasModule('clinical') && can('encounter:update') && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="-mr-2"
+                            onClick={() => setRetiringAllergy(allergy)}
+                            aria-label={`Retirar alergia a ${allergy.substance}`}
+                          >
+                            Retirar
+                          </Button>
+                        )}
+                      </div>
                     </li>
                   );
                 })}
@@ -449,6 +417,8 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               label="Documentos do paciente"
             />
           </div>
+
+          <PatientImmunizationsCard patientId={patient.id} active={patient.status === 'active'} />
 
           {((can('document:generate') && hasModule('documents')) ||
             (can('death:record') && hasModule('clinical') && patient.status === 'active')) && (
@@ -511,6 +481,11 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
         onOpenChange={setAllergyOpen}
         patientId={patient.id}
         onSaved={() => void queryClient.invalidateQueries({ queryKey: ['patient', patient.id] })}
+      />
+      <AllergyStatusSheet
+        patientId={patient.id}
+        allergy={retiringAllergy}
+        onClose={() => setRetiringAllergy(null)}
       />
     </>
   );

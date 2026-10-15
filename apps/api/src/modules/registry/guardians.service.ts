@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
-import type { CreateGuardian, Guardian } from '@chiron/contracts';
+import type { CreateGuardian, Guardian, InactivateGuardian, ListGuardiansQuery } from '@chiron/contracts';
 import { DatabaseService } from '../../database/database.service';
 import { AuditService } from '../../common/audit.service';
 import { CryptoService } from '../../common/crypto.service';
+import { decodeCursor, encodeCursor } from '../../common/cursor';
 import { AppError } from '../../common/errors';
 import { uuidv7 } from '../../common/uuid';
 import type { RequestContext } from '../../common/request-context';
@@ -24,6 +25,8 @@ interface GuardianRow {
   address: Record<string, unknown> | null;
   notes: string | null;
   tags: string[];
+  inactive_reason: string | null;
+  inactivated_at: Date | null;
   created_at: Date;
   updated_at: Date;
   patient_count?: string;
@@ -54,37 +57,54 @@ export class GuardiansService {
       notes: row.notes,
       tags: row.tags ?? [],
       patientCount: row.patient_count ? Number(row.patient_count) : undefined,
+      inactiveAt: row.inactivated_at?.toISOString() ?? null,
+      inactiveReason: row.inactive_reason,
       createdAt: row.created_at.toISOString(),
       updatedAt: row.updated_at.toISOString(),
     };
   }
 
-  async list(ctx: RequestContext, params: { q?: string; limit: number; cursor?: string }) {
+  async list(ctx: RequestContext, params: ListGuardiansQuery) {
     // Recepção digita o CPF ou o telefone do jeito que o tutor fala: o CPF
     // casa pelo índice cego (o documento é cifrado) e o telefone sem máscara.
     const digits = params.q?.replace(/\D/g, '') ?? '';
     const documentHash = digits.length === 11 || digits.length === 14 ? this.crypto.blindIndex(digits) : null;
     const phoneDigits = digits.length >= 4 ? digits : null;
+    const cursor = decodeCursor(params.cursor);
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
-      const { rows } = await tx.query<GuardianRow>(
-        `SELECT g.*, (SELECT count(*) FROM registry.patient_guardians pg
-                       WHERE pg.tenant_id = g.tenant_id AND pg.guardian_id = g.id AND pg.valid_to IS NULL)::text AS patient_count
+      const { rows } = await tx.query<GuardianRow & { cursor_at: string }>(
+        `SELECT g.*, g.created_at::text AS cursor_at,
+                (SELECT count(*) FROM registry.patient_guardians pg
+                  WHERE pg.tenant_id = g.tenant_id AND pg.guardian_id = g.id AND pg.valid_to IS NULL)::text AS patient_count
            FROM registry.guardians g
           WHERE g.tenant_id = $1 AND g.deleted_at IS NULL
             AND ($2::text IS NULL OR g.name ILIKE '%' || $2 || '%' OR g.phone_primary ILIKE '%' || $2 || '%'
                  OR g.email::text ILIKE '%' || $2 || '%'
                  OR ($5::text IS NOT NULL AND regexp_replace(coalesce(g.phone_primary, ''), '\\D', '', 'g') LIKE '%' || $5 || '%')
                  OR ($6::text IS NOT NULL AND g.document_hash = $6))
-            AND ($3::timestamptz IS NULL OR g.created_at < $3)
-          ORDER BY g.created_at DESC
+            AND ($3::timestamptz IS NULL OR g.created_at < $3
+                 OR (g.created_at = $3 AND $8::uuid IS NOT NULL AND g.id < $8))
+            AND ($7::text IS NULL
+                 OR ($7 = 'active' AND g.inactivated_at IS NULL)
+                 OR ($7 = 'inactive' AND g.inactivated_at IS NOT NULL))
+          ORDER BY g.created_at DESC, g.id DESC
           LIMIT $4`,
-        [ctx.tenantId, params.q ?? null, params.cursor ?? null, params.limit + 1, phoneDigits, documentHash],
+        [
+          ctx.tenantId,
+          params.q ?? null,
+          cursor?.at ?? null,
+          params.limit + 1,
+          phoneDigits,
+          documentHash,
+          params.status ?? null,
+          cursor?.id ?? null,
+        ],
       );
 
       const hasMore = rows.length > params.limit;
       const items = (hasMore ? rows.slice(0, params.limit) : rows).map((r) => this.toDto(r));
       const last = hasMore ? rows[params.limit - 1] : undefined;
-      return { items, nextCursor: last ? last.created_at.toISOString() : null };
+      return { items, nextCursor: last ? encodeCursor(last.cursor_at, last.id) : null };
     });
   }
 
@@ -122,14 +142,17 @@ export class GuardiansService {
 
     const documentHash = input.document ? this.crypto.blindIndex(input.document) : null;
     if (documentHash) {
-      const existing = await tx.query<{ id: string; name: string }>(
-        `SELECT id, name FROM registry.guardians
+      const existing = await tx.query<{ id: string; name: string; inactivated_at: Date | null }>(
+        `SELECT id, name, inactivated_at FROM registry.guardians
           WHERE tenant_id = $1 AND document_hash = $2 AND deleted_at IS NULL`,
         [ctx.tenantId, documentHash],
       );
-      if (existing.rows[0]) {
-        throw AppError.conflict(`Já existe um tutor com este documento: ${existing.rows[0].name}.`, {
-          guardianId: existing.rows[0].id,
+      const found = existing.rows[0];
+      if (found) {
+        // Tutor que voltou depois de inativado: reativar, não cadastrar de novo.
+        const hint = found.inactivated_at ? ' (cadastro inativo: reative em vez de cadastrar de novo)' : '';
+        throw AppError.conflict(`Já existe um tutor com este documento: ${found.name}${hint}.`, {
+          guardianId: found.id,
         });
       }
     }
@@ -267,6 +290,67 @@ export class GuardiansService {
         entityId: id,
       });
     });
+  }
+
+  /**
+   * Tutor que não frequenta mais a clínica: some dos seletores e não recebe
+   * vínculo novo, mas os pacientes continuam vinculados e o cadastro segue
+   * consultável. Diferente da exclusão e da anonimização (LGPD), volta atrás.
+   */
+  async inactivate(ctx: RequestContext, id: string, input: InactivateGuardian): Promise<Guardian> {
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const current = await this.findForStatusChange(tx, ctx, id);
+      if (current.inactivated_at) throw AppError.conflict('O cadastro deste tutor já está inativo.');
+
+      await tx.query(
+        `UPDATE registry.guardians
+            SET inactivated_at = now(), inactive_reason = $3, inactivated_by = $4, updated_by = $4
+          WHERE id = $1 AND tenant_id = $2`,
+        [id, ctx.tenantId, input.reason, ctx.user.id],
+      );
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'guardian.inactivate',
+        entitySchema: 'registry',
+        entityTable: 'guardians',
+        entityId: id,
+        reason: input.reason,
+      });
+    });
+    return this.get(ctx, id);
+  }
+
+  async reactivate(ctx: RequestContext, id: string): Promise<Guardian> {
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const current = await this.findForStatusChange(tx, ctx, id);
+      if (!current.inactivated_at) throw AppError.conflict('O cadastro deste tutor já está ativo.');
+
+      await tx.query(
+        `UPDATE registry.guardians
+            SET inactivated_at = NULL, inactive_reason = NULL, inactivated_by = NULL, updated_by = $3
+          WHERE id = $1 AND tenant_id = $2`,
+        [id, ctx.tenantId, ctx.user.id],
+      );
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'guardian.reactivate',
+        entitySchema: 'registry',
+        entityTable: 'guardians',
+        entityId: id,
+      });
+    });
+    return this.get(ctx, id);
+  }
+
+  private async findForStatusChange(tx: PoolClient, ctx: RequestContext, id: string) {
+    const { rows } = await tx.query<{ inactivated_at: Date | null }>(
+      `SELECT inactivated_at FROM registry.guardians
+        WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL FOR UPDATE`,
+      [id, ctx.tenantId],
+    );
+    const row = rows[0];
+    if (!row) throw AppError.notFound('Tutor');
+    return row;
   }
 
   /** Exportação LGPD: dados do titular e dos pacientes vinculados. */

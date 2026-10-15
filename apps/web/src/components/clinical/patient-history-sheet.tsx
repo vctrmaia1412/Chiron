@@ -5,13 +5,13 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { ExamOrder, Immunization, MedicalRecord, Prescription, PreventiveTreatment } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
-import { formatDate, formatDateShort } from '@/lib/format';
 import { useSession } from '@/lib/session';
-import { Badge, ErrorState, ListSkeleton } from '@/components/ui/primitives';
+import { ErrorState, ListSkeleton } from '@/components/ui/primitives';
 import { Sheet } from '@/components/ui/sheet';
 import { Tabs } from '@/components/ui/tabs';
 import { MountWhenOpen } from '@/components/ui/mount-when-open';
 import { ExamOrderRow } from '@/components/lab/exam-order-row';
+import { AppliedRecordList, mergeRecords } from '@/components/immunization/applied-records';
 import { PrescriptionBlock } from './clinical-blocks';
 import { RecordEncounterEntry } from './record-entry';
 
@@ -131,33 +131,12 @@ function PatientHistorySheetContent({
         ) : (vaccines.data?.immunizations.length ?? 0) + (vaccines.data?.preventives.length ?? 0) === 0 ? (
           <Empty>Nenhuma vacina ou preventivo registrado.</Empty>
         ) : (
-          <ul className="divide-y divide-[var(--border)] rounded-[var(--radius)] border border-[var(--border)]">
-            {vaccines.data!.immunizations.map((item) => (
-              <li key={item.id} className="px-3.5 py-2.5">
-                <p className="flex flex-wrap items-center gap-2 text-[14px] font-medium text-[var(--ink)]">
-                  {item.vaccineName}
-                  {item.doseNumber ? <span className="text-[12px] font-normal text-[var(--ink-3)]">{item.doseNumber}ª dose</span> : null}
-                  {item.status !== 'completed' && <Badge tone="muted">Cancelada</Badge>}
-                </p>
-                <p className="text-[12.5px] text-[var(--ink-3)]">
-                  {formatDate(item.administeredAt)}
-                  {item.lotNumber ? ` · lote ${item.lotNumber}` : ''}
-                  {item.nextDueAt ? ` · próxima ${formatDateShort(item.nextDueAt)}` : ''}
-                </p>
-              </li>
-            ))}
-            {vaccines.data!.preventives.map((item) => (
-              <li key={item.id} className="px-3.5 py-2.5">
-                <p className="text-[14px] font-medium text-[var(--ink)]">{item.productName}</p>
-                <p className="text-[12.5px] text-[var(--ink-3)]">
-                  {item.kind === 'deworming' ? 'Vermífugo' : item.kind === 'ectoparasite' ? 'Antiparasitário' : 'Preventivo'}
-                  {' · '}
-                  {formatDate(item.administeredAt)}
-                  {item.nextDueAt ? ` · próxima ${formatDateShort(item.nextDueAt)}` : ''}
-                </p>
-              </li>
-            ))}
-          </ul>
+          // Só consulta: corrigir e cancelar ficam na ficha e no cartão do atendimento.
+          <AppliedRecordList
+            records={mergeRecords(vaccines.data)}
+            actions={false}
+            className="rounded-[var(--radius)] border border-[var(--border)]"
+          />
         ))}
 
       {tab === 'receitas' &&

@@ -65,7 +65,8 @@ export class SearchService {
                 OR p.internal_code ILIKE $2
                 OR EXISTS (
                   SELECT 1 FROM registry.patient_identifiers pi
-                   WHERE pi.patient_id = p.id AND pi.tenant_id = p.tenant_id AND pi.value ILIKE $2)
+                   WHERE pi.patient_id = p.id AND pi.tenant_id = p.tenant_id AND pi.removed_at IS NULL
+                     AND pi.value ILIKE $2)
               )
             ORDER BY (p.name ILIKE $4) DESC, p.name
             LIMIT $5`,
@@ -203,7 +204,7 @@ export class SearchService {
               p.internal_code = ANY($2)
               OR EXISTS (SELECT 1 FROM registry.patient_identifiers pi
                           WHERE pi.patient_id = p.id AND pi.tenant_id = p.tenant_id
-                            AND pi.value = ANY($2))
+                            AND pi.removed_at IS NULL AND pi.value = ANY($2))
             )
           LIMIT 1`,
         [ctx.tenantId, candidates],

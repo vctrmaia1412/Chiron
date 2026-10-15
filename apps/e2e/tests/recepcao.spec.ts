@@ -112,6 +112,10 @@ test('check-in com peso abre o atendimento com o motivo como queixa', async ({ p
   await sheet.getByLabel('Peso aferido').fill('9,6');
   await sheet.getByRole('button', { name: 'Confirmar chegada' }).click();
 
+  // a recepção continua na agenda para o próximo cliente; o atendimento fica a um toque
+  await expect(page.getByText(/Check-in realizado/).first()).toBeVisible();
+  await expect(page).toHaveURL(/\/agenda/);
+  await page.locator('li', { hasText: animal }).first().getByRole('link', { name: 'Abrir atendimento' }).click();
   await page.waitForURL(/\/atendimentos\/[0-9a-f-]{36}$/);
   await settle(page);
   await expect(page.getByText(animal).first()).toBeVisible();
@@ -140,4 +144,97 @@ test('cancela um agendamento e marca falta em outro', async ({ page, api }) => {
   await sheet.getByLabel(/falta/i).check();
   await sheet.getByRole('button', { name: 'Registrar falta' }).click();
   await expect(page.getByText('Falta registrada.').first()).toBeVisible();
+});
+
+test('cancelar depois do check-in cancela junto o atendimento aberto', async ({ page, api }) => {
+  const animal = uniqueName('Biscoito');
+  const patient = await createPatient(api, animal);
+  const appointment = await createAppointment(api, patient.id, patient.guardianId, 120, 'Tosse');
+  const checkIn = await api.post<{ encounterId: string }>(`/appointments/${appointment.id}/check-in`, {});
+
+  const row = await agendaRow(page, animal);
+  await row.getByRole('button', { name: 'Cancelar' }).click();
+  const sheet = page.getByRole('dialog');
+  // depois da chegada não existe falta, e o aviso diz o que acontece com o atendimento
+  await expect(sheet.getByText(/atendimento aberto na chegada também será cancelado/)).toBeVisible();
+  await expect(sheet.getByLabel(/falta/i)).toHaveCount(0);
+  await sheet.getByRole('button', { name: 'Cancelar agendamento' }).click();
+  await expect(page.getByText('Agendamento cancelado.').first()).toBeVisible();
+
+  const encounter = await api.get<{ status: string }>(`/encounters/${checkIn.encounterId}`);
+  expect(encounter.status).toBe('cancelled');
+});
+
+test('remarca pela agenda e o horário muda na lista', async ({ page, api }) => {
+  const animal = uniqueName('Nescau');
+  const patient = await createPatient(api, animal);
+  await createAppointment(api, patient.id, patient.guardianId, 130, 'Revisão');
+
+  const row = await agendaRow(page, animal);
+  await row.getByRole('button', { name: 'Remarcar' }).click();
+  const form = page.getByRole('dialog');
+  await expect(form.getByText('Remarcar').first()).toBeVisible();
+  await form.getByLabel('Data').fill(todayIso(2));
+  await form.getByLabel('Horário').fill('10:53');
+  await form.getByRole('button', { name: 'Salvar novo horário' }).click();
+  await expect(page.getByText('Agendamento remarcado.').first()).toBeVisible();
+
+  // a agenda vai para o dia novo e mostra o horário novo
+  await settle(page);
+  const moved = page.locator('li', { hasText: animal }).first();
+  await expect(moved).toContainText('10:53');
+});
+
+test('visão da semana mostra o dia cheio e abre o dia com um toque', async ({ page, api }) => {
+  const animal = uniqueName('Quindim');
+  const patient = await createPatient(api, animal);
+  await createAppointment(api, patient.id, patient.guardianId, 140, 'Consulta');
+
+  await page.goto('/agenda');
+  await settle(page);
+  await page.getByRole('button', { name: 'Semana', exact: true }).click();
+  await settle(page);
+  await expect(page.getByText(animal).first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.getByRole('button', { name: new RegExp(animal) }).first().click();
+  await expect(page.getByRole('button', { name: 'Dia', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('li', { hasText: animal }).first().getByRole('button', { name: 'Check-in' })).toBeVisible();
+});
+
+test('retorno pedido pelo veterinário é agendado pela recepção e sai da lista', async ({ page, apiAs }) => {
+  const vet = await apiAs('vet');
+  const animal = uniqueName('Retorno');
+  const patient = await createPatient(vet, animal);
+  const encounter = await vet.post<{ id: string }>('/encounters', {
+    patientId: patient.id,
+    class: 'outpatient',
+    chiefComplaint: 'Otite',
+  });
+  await vet.post(`/encounters/${encounter.id}/start`);
+  await vet.post(`/encounters/${encounter.id}/finish`, {
+    followUpDueAt: todayIso(10),
+    followUpReason: 'Reavaliar otite',
+    minimumContentJustification: 'Teste de retorno',
+  });
+
+  await page.goto('/agenda');
+  await settle(page);
+  // clínica cheia tem centenas de retornos: a recepção acha pelo nome
+  await page.getByLabel('Buscar retorno por paciente ou tutor').fill(animal);
+  await settle(page);
+  const card = page.locator('li', { hasText: animal }).filter({ hasText: 'Reavaliar otite' }).first();
+  await expect(card).toBeVisible();
+  await card.getByRole('button', { name: 'Agendar retorno' }).click();
+
+  const form = page.getByRole('dialog');
+  await expect(form.getByText('Agendar retorno').first()).toBeVisible();
+  await expect(form.getByLabel('Motivo')).toHaveValue('Reavaliar otite');
+  await expect(form.getByLabel('Data')).toHaveValue(todayIso(10));
+  await form.getByLabel('Profissional').selectOption({ index: 1 });
+  await form.getByLabel('Horário').fill('15:37');
+  await form.getByRole('button', { name: 'Agendar', exact: true }).click();
+  await expect(page.getByText('Agendamento criado.').first()).toBeVisible();
+
+  await expect(page.locator('li', { hasText: animal }).filter({ hasText: 'Agendar retorno' })).toHaveCount(0);
+  await expect(page.getByText(`Nenhum retorno para "${animal}"`)).toBeVisible();
 });

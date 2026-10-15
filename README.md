@@ -128,6 +128,7 @@ estado vem da API. O navegador não guarda prontuário.
 | `pnpm lint` | ESLint em todos os pacotes |
 | `pnpm test` | Testes de unidade |
 | `pnpm test:integration` | Testes de integração contra PostgreSQL real |
+| `pnpm test:e2e` | Jornadas no navegador (celular e computador) com Playwright, contra API e web de pé e o seed de demonstração. Usa o Chrome instalado; `E2E_BASE_URL` e `E2E_API_URL` apontam para outra pilha |
 | `pnpm db:migrate` | Aplica migrações e dados de referência |
 | `pnpm db:seed` | Dados de demonstração |
 | `pnpm db:reset` | Recria o banco do zero |

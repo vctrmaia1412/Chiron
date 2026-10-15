@@ -6,6 +6,8 @@ export const PASSWORD = process.env.E2E_PASSWORD ?? 'Chiron@2026';
 
 export const ROLES = {
   vet: 'vet@chiron.dev',
+  /** Segunda veterinária: cobre o plantão e assume atendimento aberto pelo colega. */
+  vet2: 'vet2@chiron.dev',
   recepcao: 'recepcao@chiron.dev',
   tecnico: 'tecnico@chiron.dev',
   admin: 'admin@chiron.dev',

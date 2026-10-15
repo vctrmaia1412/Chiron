@@ -148,7 +148,10 @@ function LoginForm() {
       </div>
 
       {error && (
-        <div className="mt-4 rounded-[var(--radius)] bg-[var(--danger-soft)] px-3 py-2.5 text-[13px] text-[var(--danger)]">
+        <div
+          role="alert"
+          className="mt-4 rounded-[var(--radius)] bg-[var(--danger-soft)] px-3 py-2.5 text-[13px] text-[var(--danger)]"
+        >
           {error}
         </div>
       )}

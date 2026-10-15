@@ -1,9 +1,12 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
   createGuardianSchema,
+  inactivateGuardianSchema,
   listGuardiansQuerySchema,
   updateGuardianSchema,
   type CreateGuardian,
+  type InactivateGuardian,
+  type ListGuardiansQuery,
 } from '@chiron/contracts';
 import { GuardiansService } from './guardians.service';
 import { Authorize, RequireStepUp } from '../../auth/authorize.decorator';
@@ -22,10 +25,7 @@ export class GuardiansController {
 
   @Get()
   @Authorize('core', 'guardian:read')
-  list(
-    @Req() req: AuthedRequest,
-    @Query(zQuery(listGuardiansQuerySchema)) query: { q?: string; limit: number; cursor?: string },
-  ) {
+  list(@Req() req: AuthedRequest, @Query(zQuery(listGuardiansQuerySchema)) query: ListGuardiansQuery) {
     return this.guardians.list(ctxOf(req), query);
   }
 
@@ -49,6 +49,23 @@ export class GuardiansController {
     @Body(zBody(updateGuardianSchema)) body: Partial<CreateGuardian>,
   ) {
     return this.guardians.update(ctxOf(req), id, body);
+  }
+
+  /** Reversível e com motivo: mesma permissão de editar o cadastro. */
+  @Post(':id/inactivate')
+  @Authorize('core', 'guardian:update')
+  inactivate(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body(zBody(inactivateGuardianSchema)) body: InactivateGuardian,
+  ) {
+    return this.guardians.inactivate(ctxOf(req), id, body);
+  }
+
+  @Post(':id/reactivate')
+  @Authorize('core', 'guardian:update')
+  reactivate(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.guardians.reactivate(ctxOf(req), id);
   }
 
   @Delete(':id')

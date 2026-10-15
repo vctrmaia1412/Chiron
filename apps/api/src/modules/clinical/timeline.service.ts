@@ -95,7 +95,9 @@ const TIMELINE_SQL = `
      WHERE er.tenant_id = $1 AND er.patient_id = $2 AND er.status <> 'entered_in_error'
 
     UNION ALL
-    SELECT i.id::text, 'immunization.applied', i.administered_at, 'Vacina aplicada', i.vaccine_name,
+    SELECT i.id::text, 'immunization.applied', i.administered_at,
+           CASE WHEN i.administered_elsewhere THEN 'Vacina aplicada em outro local' ELSE 'Vacina aplicada' END,
+           i.vaccine_name,
            'basic', i.encounter_id, 'immunization.immunizations', i.id, prof.name
       FROM immunization.immunizations i
       LEFT JOIN registry.professionals prof ON prof.id = i.professional_id AND prof.tenant_id = i.tenant_id
@@ -109,7 +111,7 @@ const TIMELINE_SQL = `
            pt.product_name, 'basic', pt.encounter_id, 'immunization.preventive_treatments', pt.id, prof.name
       FROM immunization.preventive_treatments pt
       LEFT JOIN registry.professionals prof ON prof.id = pt.professional_id AND prof.tenant_id = pt.tenant_id
-     WHERE pt.tenant_id = $1 AND pt.patient_id = $2
+     WHERE pt.tenant_id = $1 AND pt.patient_id = $2 AND pt.status = 'completed'
 
     UNION ALL
     SELECT doc.id::text, 'document.attached', doc.created_at, 'Documento', doc.title, 'basic',

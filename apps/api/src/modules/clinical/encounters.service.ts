@@ -1266,7 +1266,7 @@ export class EncountersService {
           (SELECT count(*) FROM immunization.immunizations i WHERE i.tenant_id = $1 AND i.encounter_id = $2
              AND i.status = 'completed')
           + (SELECT count(*) FROM immunization.preventive_treatments pt
-              WHERE pt.tenant_id = $1 AND pt.encounter_id = $2)
+              WHERE pt.tenant_id = $1 AND pt.encounter_id = $2 AND pt.status = 'completed')
         )::text AS immunizations,
         (SELECT count(*) FROM lab.exam_orders o WHERE o.tenant_id = $1 AND o.encounter_id = $2
            AND o.status <> 'cancelled')::text AS exams,

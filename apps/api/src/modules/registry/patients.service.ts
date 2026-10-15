@@ -1,14 +1,46 @@
 import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { ageLabel, normalizeIngredient, normalizeObservation, toKilograms } from '@chiron/domain';
-import type { CreatePatient, Patient, PatientListItem, RecordDeath } from '@chiron/contracts';
+import type {
+  AddPatientGuardian,
+  AddPatientIdentifier,
+  CreatePatient,
+  InactivatePatient,
+  ListPatientsQuery,
+  Patient,
+  PatientListItem,
+  RecordDeath,
+  UpdateAllergyStatus,
+} from '@chiron/contracts';
 import { DatabaseService } from '../../database/database.service';
 import { AuditService } from '../../common/audit.service';
+import { decodeCursor, encodeCursor } from '../../common/cursor';
 import { AppError } from '../../common/errors';
 import { uuidv7 } from '../../common/uuid';
 import type { RequestContext } from '../../common/request-context';
 import { contextToTenantContext } from '../../common/request-context';
 import { GuardiansService } from './guardians.service';
+
+const IDENTIFIER_NOUN: Record<string, string> = {
+  microchip: 'microchip',
+  ear_tag: 'brinco',
+  sisbov: 'SISBOV',
+  leg_band: 'anilha',
+  passport: 'passaporte',
+  registry: 'registro',
+  tattoo: 'tatuagem',
+  license: 'licença',
+  internal: 'código interno',
+};
+
+/**
+ * Leitor e digitação divergem em espaço, ponto e hífen ("985 112 000 123 456"):
+ * no microchip só os caracteres contam, senão o mesmo chip entra duas vezes.
+ */
+function normalizeIdentifierValue(scheme: string, value: string): string {
+  const trimmed = value.trim().replace(/\s+/g, ' ');
+  return scheme === 'microchip' ? trimmed.replace(/[\s.-]/g, '').toUpperCase() : trimmed;
+}
 
 @Injectable()
 export class PatientsService {
@@ -20,8 +52,9 @@ export class PatientsService {
 
   async list(
     ctx: RequestContext,
-    params: { q?: string; speciesId?: string; status?: string; guardianId?: string; limit: number; cursor?: string },
+    params: ListPatientsQuery,
   ): Promise<{ items: PatientListItem[]; nextCursor: string | null }> {
+    const cursor = decodeCursor(params.cursor);
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       const { rows } = await tx.query<{
         id: string;
@@ -39,7 +72,7 @@ export class PatientsService {
         guardian_phone: string | null;
         alert_count: string;
         last_encounter_at: Date | null;
-        created_at: Date;
+        cursor_at: string;
       }>(
         `SELECT p.id, p.number::text, p.name, s.name_pt AS species_name, s.category AS species_category,
                 b.name AS breed_name, p.sex, p.birth_date, p.estimated_age_months,
@@ -49,7 +82,7 @@ export class PatientsService {
                   WHERE pa.patient_id = p.id AND pa.tenant_id = p.tenant_id AND pa.active)::text AS alert_count,
                 (SELECT max(e.created_at) FROM clinical.encounters e
                   WHERE e.patient_id = p.id AND e.tenant_id = p.tenant_id) AS last_encounter_at,
-                p.created_at
+                p.created_at::text AS cursor_at
            FROM registry.patients p
            JOIN registry.species s ON s.id = p.species_id
            LEFT JOIN registry.breeds b ON b.id = p.breed_id
@@ -63,22 +96,26 @@ export class PatientsService {
           WHERE p.tenant_id = $1 AND p.deleted_at IS NULL
             AND ($2::text IS NULL OR p.name ILIKE '%' || $2 || '%' OR g.name ILIKE '%' || $2 || '%'
                  OR EXISTS (SELECT 1 FROM registry.patient_identifiers pi
-                             WHERE pi.patient_id = p.id AND pi.tenant_id = p.tenant_id AND pi.value ILIKE '%' || $2 || '%'))
+                             WHERE pi.patient_id = p.id AND pi.tenant_id = p.tenant_id AND pi.removed_at IS NULL
+                               AND pi.value ILIKE '%' || $2 || '%'))
             AND ($3::uuid IS NULL OR p.species_id = $3)
-            AND ($4::text IS NULL OR p.status = $4)
+            AND ($4::text[] IS NULL OR p.status = ANY($4))
             AND ($5::uuid IS NULL OR EXISTS (
                   SELECT 1 FROM registry.patient_guardians pg2
-                   WHERE pg2.patient_id = p.id AND pg2.tenant_id = p.tenant_id AND pg2.guardian_id = $5))
-            AND ($6::timestamptz IS NULL OR p.created_at < $6)
-          ORDER BY p.created_at DESC
-          LIMIT $7`,
+                   WHERE pg2.patient_id = p.id AND pg2.tenant_id = p.tenant_id AND pg2.guardian_id = $5
+                     AND pg2.valid_to IS NULL))
+            AND ($6::timestamptz IS NULL OR p.created_at < $6
+                 OR (p.created_at = $6 AND $7::uuid IS NOT NULL AND p.id < $7))
+          ORDER BY p.created_at DESC, p.id DESC
+          LIMIT $8`,
         [
           ctx.tenantId,
           params.q ?? null,
           params.speciesId ?? null,
           params.status ?? null,
           params.guardianId ?? null,
-          params.cursor ?? null,
+          cursor?.at ?? null,
+          cursor?.id ?? null,
           params.limit + 1,
         ],
       );
@@ -104,7 +141,7 @@ export class PatientsService {
       }));
 
       const last = hasMore ? page[page.length - 1] : undefined;
-      return { items, nextCursor: last ? last.created_at.toISOString() : null };
+      return { items, nextCursor: last ? encodeCursor(last.cursor_at, last.id) : null };
     });
   }
 
@@ -134,6 +171,8 @@ export class PatientsService {
       current_weight_kg: string | null;
       current_weight_at: Date | null;
       status: string;
+      inactive_reason: string | null;
+      inactivated_at: Date | null;
       no_known_allergies: boolean;
       attributes: Record<string, unknown>;
       notes: string | null;
@@ -146,8 +185,8 @@ export class PatientsService {
               s.category AS species_category, s.default_weight_uom AS species_weight_uom,
               p.breed_id, b.name AS breed_name, p.breed_free_text, p.sex, p.reproductive_status,
               p.birth_date, p.birth_date_precision, p.estimated_age_months, p.color_markings,
-              p.current_weight_kg::text, p.current_weight_at, p.status, p.no_known_allergies,
-              p.attributes, p.notes, p.internal_code, p.created_at, p.updated_at,
+              p.current_weight_kg::text, p.current_weight_at, p.status, p.inactive_reason, p.inactivated_at,
+              p.no_known_allergies, p.attributes, p.notes, p.internal_code, p.created_at, p.updated_at,
               (SELECT d.occurred_at FROM clinical.patient_deaths d
                 WHERE d.patient_id = p.id AND d.tenant_id = p.tenant_id) AS deceased_at
          FROM registry.patients p
@@ -162,7 +201,8 @@ export class PatientsService {
     const [guardians, identifiers, allergies, alerts] = await Promise.all([
       tx.query(
         `SELECT pg.guardian_id AS "guardianId", g.name AS "guardianName", g.phone_primary AS "guardianPhone",
-                g.email::text AS "guardianEmail", pg.role, pg.is_primary AS "isPrimary"
+                g.email::text AS "guardianEmail", pg.role, pg.is_primary AS "isPrimary",
+                (g.inactivated_at IS NOT NULL) AS "guardianInactive"
            FROM registry.patient_guardians pg
            JOIN registry.guardians g ON g.id = pg.guardian_id AND g.tenant_id = pg.tenant_id
           WHERE pg.patient_id = $1 AND pg.tenant_id = $2 AND pg.valid_to IS NULL
@@ -171,7 +211,7 @@ export class PatientsService {
       ),
       tx.query(
         `SELECT id, scheme, value, issuer FROM registry.patient_identifiers
-          WHERE patient_id = $1 AND tenant_id = $2 ORDER BY scheme`,
+          WHERE patient_id = $1 AND tenant_id = $2 AND removed_at IS NULL ORDER BY scheme, created_at`,
         [id, ctx.tenantId],
       ),
       tx.query(
@@ -211,6 +251,8 @@ export class PatientsService {
       currentWeightKg: row.current_weight_kg,
       currentWeightAt: row.current_weight_at?.toISOString() ?? null,
       status: row.status as Patient['status'],
+      inactiveReason: row.inactive_reason,
+      inactivatedAt: row.inactivated_at?.toISOString() ?? null,
       noKnownAllergies: row.no_known_allergies,
       attributes: row.attributes ?? {},
       notes: row.notes,
@@ -282,6 +324,10 @@ export class PatientsService {
         guardianLinks.unshift({ guardianId, role: 'owner', isPrimary: true });
       }
 
+      for (const link of input.guardians ?? []) {
+        await this.assertGuardianLinkable(tx, ctx, link.guardianId);
+      }
+
       let hasPrimary = false;
       for (const link of guardianLinks) {
         const isPrimary = link.isPrimary && !hasPrimary;
@@ -313,11 +359,7 @@ export class PatientsService {
       }
 
       for (const identifier of input.identifiers ?? []) {
-        await tx.query(
-          `INSERT INTO registry.patient_identifiers (id, tenant_id, patient_id, scheme, value, issuer)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
-          [uuidv7(), ctx.tenantId, patientId, identifier.scheme, identifier.value, identifier.issuer ?? null],
-        );
+        await this.insertIdentifier(tx, ctx, patientId, identifier);
       }
 
       if (input.weightKg) {
@@ -361,12 +403,11 @@ export class PatientsService {
                 attributes = COALESCE($13, attributes),
                 notes = COALESCE($14, notes),
                 internal_code = COALESCE($15, internal_code),
-                status = COALESCE($16, status),
-                no_known_allergies = COALESCE($17, no_known_allergies),
-                no_known_allergies_at = CASE WHEN $17::boolean IS TRUE THEN now() ELSE no_known_allergies_at END,
-                no_known_allergies_by = CASE WHEN $17::boolean IS TRUE THEN $18 ELSE no_known_allergies_by END,
+                no_known_allergies = COALESCE($16, no_known_allergies),
+                no_known_allergies_at = CASE WHEN $16::boolean IS TRUE THEN now() ELSE no_known_allergies_at END,
+                no_known_allergies_by = CASE WHEN $16::boolean IS TRUE THEN $17 ELSE no_known_allergies_by END,
                 row_version = row_version + 1,
-                updated_by = $18
+                updated_by = $17
           WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
         [
           id,
@@ -384,7 +425,6 @@ export class PatientsService {
           input.attributes ? JSON.stringify(input.attributes) : null,
           input.notes ?? null,
           input.internalCode ?? null,
-          input.status ?? null,
           input.noKnownAllergies ?? null,
           ctx.user.id,
         ],
@@ -413,8 +453,13 @@ export class PatientsService {
       );
       if (Number(signed.rows[0]?.count ?? '0') > 0) {
         // Prontuário assinado tem guarda obrigatória: inativa em vez de excluir.
+        // Óbito continua óbito: a exclusão não apaga essa situação.
         await tx.query(
-          `UPDATE registry.patients SET status = 'inactive', updated_by = $3 WHERE id = $1 AND tenant_id = $2`,
+          `UPDATE registry.patients
+              SET status = 'inactive', updated_by = $3,
+                  inactive_reason = 'Exclusão pedida; prontuário mantido por guarda obrigatória',
+                  inactivated_at = now(), inactivated_by = $3
+            WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
           [id, ctx.tenantId, ctx.user.id],
         );
       } else {
@@ -424,6 +469,12 @@ export class PatientsService {
           [id, ctx.tenantId, ctx.user.id],
         );
         if (!rowCount) throw AppError.notFound('Paciente');
+        // Cadastro excluído não segura o microchip: o número pode ir para o animal certo.
+        await tx.query(
+          `UPDATE registry.patient_identifiers SET removed_at = now(), removed_by = $3
+            WHERE patient_id = $1 AND tenant_id = $2 AND removed_at IS NULL`,
+          [id, ctx.tenantId, ctx.user.id],
+        );
       }
 
       await this.audit.record(tx, ctx, {
@@ -436,30 +487,126 @@ export class PatientsService {
     });
   }
 
-  async addGuardian(
+  /**
+   * Paciente em uso nesta organização. Com `lock`, a linha fica presa até o
+   * fim da transação: duas recepcionistas desvinculando ao mesmo tempo não
+   * conseguem, juntas, deixar o animal sem tutor.
+   */
+  private async findPatient(
+    tx: PoolClient,
     ctx: RequestContext,
     patientId: string,
-    input: { guardianId: string; role: string; isPrimary: boolean },
-  ): Promise<void> {
+    lock = false,
+  ): Promise<{ id: string; status: string }> {
+    const { rows } = await tx.query<{ id: string; status: string }>(
+      `SELECT id, status FROM registry.patients
+        WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL${lock ? ' FOR UPDATE' : ''}`,
+      [patientId, ctx.tenantId],
+    );
+    const patient = rows[0];
+    if (!patient) throw AppError.notFound('Paciente');
+    return patient;
+  }
+
+  /** Vínculo novo só com tutor que existe e está ativo. */
+  private async assertGuardianLinkable(tx: PoolClient, ctx: RequestContext, guardianId: string): Promise<void> {
+    const { rows } = await tx.query<{ inactivated_at: Date | null }>(
+      `SELECT inactivated_at FROM registry.guardians WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [guardianId, ctx.tenantId],
+    );
+    const guardian = rows[0];
+    if (!guardian) throw AppError.notFound('Tutor');
+    if (guardian.inactivated_at) {
+      throw AppError.conflict('Este tutor está inativo. Reative o cadastro dele antes de vincular.', { guardianId });
+    }
+  }
+
+  /**
+   * Identificador em uso é único na organização. A mensagem diz em qual
+   * animal o número já está, para a recepção decidir se é erro de digitação
+   * ou cadastro duplicado.
+   */
+  private async insertIdentifier(
+    tx: PoolClient,
+    ctx: RequestContext,
+    patientId: string,
+    input: AddPatientIdentifier,
+  ): Promise<{ id: string; scheme: string; value: string; issuer: string | null }> {
+    const value = normalizeIdentifierValue(input.scheme, input.value);
+    if (!value) throw AppError.validation('Informe o número do identificador.');
+
+    const taken = await tx.query<{ patient_id: string; name: string; number: string }>(
+      `SELECT pi.patient_id, p.name, p.number::text
+         FROM registry.patient_identifiers pi
+         JOIN registry.patients p ON p.id = pi.patient_id AND p.tenant_id = pi.tenant_id
+        WHERE pi.tenant_id = $1 AND pi.scheme = $2 AND pi.value = $3 AND pi.removed_at IS NULL`,
+      [ctx.tenantId, input.scheme, value],
+    );
+    const owner = taken.rows[0];
+    if (owner) {
+      const noun = IDENTIFIER_NOUN[input.scheme] ?? 'identificador';
+      throw AppError.conflict(
+        owner.patient_id === patientId
+          ? `Este número de ${noun} já está cadastrado neste paciente.`
+          : `Este número de ${noun} já está cadastrado no paciente ${owner.name} (nº ${owner.number}).`,
+        { patientId: owner.patient_id },
+      );
+    }
+
+    const id = uuidv7();
+    const issuer = input.issuer || null;
+    await tx.query(
+      `INSERT INTO registry.patient_identifiers (id, tenant_id, patient_id, scheme, value, issuer)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [id, ctx.tenantId, patientId, input.scheme, value, issuer],
+    );
+    return { id, scheme: input.scheme, value, issuer };
+  }
+
+  /** Vincula tutor cadastrado ou cria um novo na mesma transação (cotutor, troca de tutor). */
+  async addGuardian(ctx: RequestContext, patientId: string, input: AddPatientGuardian): Promise<Patient> {
     await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
-      if (input.isPrimary) {
+      await this.findPatient(tx, ctx, patientId, true);
+
+      let guardianId = input.guardianId;
+      if (input.newGuardian) {
+        guardianId = await this.guardians.createInTx(tx, ctx, input.newGuardian);
+      } else if (guardianId) {
+        await this.assertGuardianLinkable(tx, ctx, guardianId);
+      }
+      if (!guardianId) throw AppError.validation('Escolha um tutor cadastrado ou informe os dados de um novo.');
+
+      const links = await tx.query<{ guardian_id: string; is_primary: boolean }>(
+        `SELECT guardian_id, is_primary FROM registry.patient_guardians
+          WHERE tenant_id = $1 AND patient_id = $2 AND valid_to IS NULL`,
+        [ctx.tenantId, patientId],
+      );
+      if (links.rows.some((link) => link.guardian_id === guardianId)) {
+        throw AppError.conflict('Este tutor já está vinculado ao paciente.');
+      }
+
+      // Sem principal ainda, o primeiro vínculo assume: a ficha sempre tem um contato de referência.
+      const isPrimary = input.isPrimary || !links.rows.some((link) => link.is_primary);
+      if (isPrimary) {
         await tx.query(
           `UPDATE registry.patient_guardians SET is_primary = false
-            WHERE tenant_id = $1 AND patient_id = $2 AND valid_to IS NULL`,
+            WHERE tenant_id = $1 AND patient_id = $2 AND valid_to IS NULL AND is_primary`,
           [ctx.tenantId, patientId],
         );
       }
+      // Vínculo encerrado com o mesmo papel volta a valer a partir de hoje; o
+      // período anterior fica na auditoria.
       await tx.query(
         `INSERT INTO registry.patient_guardians (tenant_id, patient_id, guardian_id, role, is_primary)
          VALUES ($1,$2,$3,$4,$5)
          ON CONFLICT (tenant_id, patient_id, guardian_id, role)
-         DO UPDATE SET is_primary = EXCLUDED.is_primary, valid_to = NULL`,
-        [ctx.tenantId, patientId, input.guardianId, input.role, input.isPrimary],
+         DO UPDATE SET is_primary = EXCLUDED.is_primary, valid_from = CURRENT_DATE, valid_to = NULL`,
+        [ctx.tenantId, patientId, guardianId, input.role, isPrimary],
       );
       await tx.query(
-        `UPDATE registry.patient_alerts SET active = false
+        `UPDATE registry.patient_alerts SET active = false, deactivated_at = now(), deactivated_by = $3
           WHERE tenant_id = $1 AND patient_id = $2 AND kind = 'no_guardian' AND active`,
-        [ctx.tenantId, patientId],
+        [ctx.tenantId, patientId, ctx.user.id],
       );
       await this.audit.record(tx, ctx, {
         category: 'mutation',
@@ -467,38 +614,139 @@ export class PatientsService {
         entitySchema: 'registry',
         entityTable: 'patient_guardians',
         entityId: patientId,
-        after: { guardianId: input.guardianId, role: input.role },
+        after: { guardianId, role: input.role, isPrimary, newGuardian: Boolean(input.newGuardian) },
       });
     });
+    return this.get(ctx, patientId);
   }
 
-  async removeGuardian(ctx: RequestContext, patientId: string, guardianId: string): Promise<void> {
+  /** Encerra o vínculo (valid_to), nunca apaga. O último tutor não sai. */
+  async removeGuardian(ctx: RequestContext, patientId: string, guardianId: string): Promise<Patient> {
     await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      await this.findPatient(tx, ctx, patientId, true);
+
+      const links = await tx.query<{ guardian_id: string; role: string; is_primary: boolean }>(
+        `SELECT guardian_id, role, is_primary FROM registry.patient_guardians
+          WHERE tenant_id = $1 AND patient_id = $2 AND valid_to IS NULL
+          ORDER BY (role = 'owner') DESC, valid_from, created_at`,
+        [ctx.tenantId, patientId],
+      );
+      const removed = links.rows.filter((link) => link.guardian_id === guardianId);
+      if (removed.length === 0) throw AppError.notFound('Vínculo com o tutor');
+
+      const remaining = links.rows.filter((link) => link.guardian_id !== guardianId);
+      const successor = remaining[0];
+      if (!successor) {
+        throw AppError.conflict(
+          'O paciente precisa de pelo menos um tutor. Vincule o novo tutor antes de desvincular este.',
+        );
+      }
+
       await tx.query(
         `UPDATE registry.patient_guardians SET valid_to = CURRENT_DATE
           WHERE tenant_id = $1 AND patient_id = $2 AND guardian_id = $3 AND valid_to IS NULL`,
         [ctx.tenantId, patientId, guardianId],
       );
+
+      // Saiu o principal: o próximo tutor (dono primeiro, depois o mais antigo) assume.
+      const promoted = removed.some((link) => link.is_primary) && !remaining.some((link) => link.is_primary);
+      if (promoted) {
+        await tx.query(
+          `UPDATE registry.patient_guardians SET is_primary = true
+            WHERE tenant_id = $1 AND patient_id = $2 AND guardian_id = $3 AND role = $4 AND valid_to IS NULL`,
+          [ctx.tenantId, patientId, successor.guardian_id, successor.role],
+        );
+      }
+
       await this.audit.record(tx, ctx, {
         category: 'mutation',
         action: 'patient.remove_guardian',
         entitySchema: 'registry',
         entityTable: 'patient_guardians',
         entityId: patientId,
+        before: { guardianId, roles: removed.map((link) => link.role) },
+        after: { primaryGuardianId: promoted ? successor.guardian_id : undefined },
+      });
+    });
+    return this.get(ctx, patientId);
+  }
+
+  async setPrimaryGuardian(ctx: RequestContext, patientId: string, guardianId: string): Promise<Patient> {
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      await this.findPatient(tx, ctx, patientId, true);
+
+      const { rows } = await tx.query<{ role: string; is_primary: boolean; inactivated_at: Date | null }>(
+        `SELECT pg.role, pg.is_primary, g.inactivated_at
+           FROM registry.patient_guardians pg
+           JOIN registry.guardians g ON g.id = pg.guardian_id AND g.tenant_id = pg.tenant_id
+          WHERE pg.tenant_id = $1 AND pg.patient_id = $2 AND pg.guardian_id = $3 AND pg.valid_to IS NULL
+          ORDER BY pg.is_primary DESC, (pg.role = 'owner') DESC
+          LIMIT 1`,
+        [ctx.tenantId, patientId, guardianId],
+      );
+      const link = rows[0];
+      if (!link) throw AppError.notFound('Vínculo com o tutor');
+      if (link.is_primary) return;
+      if (link.inactivated_at) {
+        throw AppError.conflict('Tutor inativo não pode ser o principal. Reative o cadastro dele antes.');
+      }
+
+      await tx.query(
+        `UPDATE registry.patient_guardians SET is_primary = false
+          WHERE tenant_id = $1 AND patient_id = $2 AND valid_to IS NULL AND is_primary`,
+        [ctx.tenantId, patientId],
+      );
+      await tx.query(
+        `UPDATE registry.patient_guardians SET is_primary = true
+          WHERE tenant_id = $1 AND patient_id = $2 AND guardian_id = $3 AND role = $4 AND valid_to IS NULL`,
+        [ctx.tenantId, patientId, guardianId, link.role],
+      );
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'patient.set_primary_guardian',
+        entitySchema: 'registry',
+        entityTable: 'patient_guardians',
+        entityId: patientId,
         after: { guardianId },
       });
     });
+    return this.get(ctx, patientId);
   }
 
-  async addIdentifier(ctx: RequestContext, patientId: string, input: { scheme: string; value: string; issuer?: string }) {
+  async addIdentifier(ctx: RequestContext, patientId: string, input: AddPatientIdentifier) {
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
-      const id = uuidv7();
-      const { rows } = await tx.query(
-        `INSERT INTO registry.patient_identifiers (id, tenant_id, patient_id, scheme, value, issuer)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, scheme, value, issuer`,
-        [id, ctx.tenantId, patientId, input.scheme, input.value, input.issuer ?? null],
+      await this.findPatient(tx, ctx, patientId);
+      const identifier = await this.insertIdentifier(tx, ctx, patientId, input);
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'patient.add_identifier',
+        entitySchema: 'registry',
+        entityTable: 'patient_identifiers',
+        entityId: identifier.id,
+        after: { patientId, scheme: identifier.scheme },
+      });
+      return identifier;
+    });
+  }
+
+  /** Remoção lógica: o número sai da ficha e da busca, a linha fica para a auditoria. */
+  async removeIdentifier(ctx: RequestContext, patientId: string, identifierId: string): Promise<void> {
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const { rows } = await tx.query<{ scheme: string }>(
+        `UPDATE registry.patient_identifiers SET removed_at = now(), removed_by = $4
+          WHERE id = $1 AND patient_id = $2 AND tenant_id = $3 AND removed_at IS NULL
+        RETURNING scheme`,
+        [identifierId, patientId, ctx.tenantId, ctx.user.id],
       );
-      return rows[0];
+      if (!rows[0]) throw AppError.notFound('Identificador');
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'patient.remove_identifier',
+        entitySchema: 'registry',
+        entityTable: 'patient_identifiers',
+        entityId: identifierId,
+        before: { patientId, scheme: rows[0].scheme },
+      });
     });
   }
 
@@ -547,16 +795,169 @@ export class PatientsService {
     });
   }
 
+  /** Alertas de manejo ("agressivo", "morde"): ficam no topo da ficha até alguém desativar. */
   async addAlert(ctx: RequestContext, patientId: string, input: { kind: string; message: string }) {
+    if (input.kind === 'no_guardian') {
+      throw AppError.validation('Este alerta é do sistema: aparece sozinho quando o paciente fica sem tutor.');
+    }
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      await this.findPatient(tx, ctx, patientId);
       const id = uuidv7();
       const { rows } = await tx.query(
         `INSERT INTO registry.patient_alerts (id, tenant_id, patient_id, kind, message, created_by)
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, kind, message, active`,
         [id, ctx.tenantId, patientId, input.kind, input.message, ctx.user.id],
       );
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'patient.add_alert',
+        entitySchema: 'registry',
+        entityTable: 'patient_alerts',
+        entityId: id,
+        after: { patientId, kind: input.kind },
+      });
       return rows[0];
     });
+  }
+
+  async deactivateAlert(ctx: RequestContext, patientId: string, alertId: string): Promise<void> {
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const { rows } = await tx.query<{ kind: string }>(
+        `SELECT kind FROM registry.patient_alerts
+          WHERE id = $1 AND patient_id = $2 AND tenant_id = $3 AND active FOR UPDATE`,
+        [alertId, patientId, ctx.tenantId],
+      );
+      const alert = rows[0];
+      if (!alert) throw AppError.notFound('Alerta');
+      if (alert.kind === 'no_guardian') {
+        throw AppError.conflict('Este alerta sai sozinho quando um tutor é vinculado ao paciente.');
+      }
+      await tx.query(
+        `UPDATE registry.patient_alerts SET active = false, deactivated_at = now(), deactivated_by = $3
+          WHERE id = $1 AND tenant_id = $2`,
+        [alertId, ctx.tenantId, ctx.user.id],
+      );
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'patient.deactivate_alert',
+        entitySchema: 'registry',
+        entityTable: 'patient_alerts',
+        entityId: alertId,
+        before: { patientId, kind: alert.kind },
+      });
+    });
+  }
+
+  /**
+   * Alergia não se apaga: sai da lista ativa como inativa (não se aplica
+   * mais) ou refutada (não era alergia). A receita deixa de alertar sobre ela.
+   */
+  async updateAllergyStatus(ctx: RequestContext, patientId: string, allergyId: string, input: UpdateAllergyStatus) {
+    return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const { rows } = await tx.query<{
+        id: string;
+        substance: string;
+        reaction: string | null;
+        severity: string;
+        status: string;
+        notedAt: Date;
+      }>(
+        `UPDATE registry.patient_allergies SET status = $4
+          WHERE id = $1 AND patient_id = $2 AND tenant_id = $3 AND status = 'active'
+        RETURNING id, substance, reaction, severity, status, noted_at AS "notedAt"`,
+        [allergyId, patientId, ctx.tenantId, input.status],
+      );
+      const allergy = rows[0];
+      if (!allergy) throw AppError.notFound('Registro de alergia');
+
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'patient.update_allergy_status',
+        entitySchema: 'registry',
+        entityTable: 'patient_allergies',
+        entityId: allergyId,
+        before: { patientId, status: 'active' },
+        after: { status: input.status },
+        reason: input.reason || null,
+      });
+      await this.audit.publish(tx, ctx, {
+        aggregateTable: 'registry.patient_allergies',
+        aggregateId: allergyId,
+        eventType: 'allergy.status_changed',
+        payload: { patientId, status: input.status },
+      });
+      return { ...allergy, notedAt: allergy.notedAt.toISOString() };
+    });
+  }
+
+  /** Deixou de ser cliente ou foi transferido: sai dos seletores, continua na busca e no prontuário. */
+  async inactivate(ctx: RequestContext, patientId: string, input: InactivatePatient): Promise<Patient> {
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const patient = await this.findPatient(tx, ctx, patientId, true);
+      if (patient.status === 'deceased') {
+        throw AppError.conflict('Paciente com óbito registrado não é inativado: o óbito já tira o cadastro de uso.');
+      }
+      if (patient.status !== 'active') throw AppError.conflict('O cadastro deste paciente já está inativo.');
+
+      const status = input.transferred ? 'transferred' : 'inactive';
+      await tx.query(
+        `UPDATE registry.patients
+            SET status = $3, inactive_reason = $4, inactivated_at = now(), inactivated_by = $5,
+                updated_by = $5, row_version = row_version + 1
+          WHERE id = $1 AND tenant_id = $2`,
+        [patientId, ctx.tenantId, status, input.reason, ctx.user.id],
+      );
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'patient.inactivate',
+        entitySchema: 'registry',
+        entityTable: 'patients',
+        entityId: patientId,
+        before: { status: patient.status },
+        after: { status },
+        reason: input.reason,
+      });
+      await this.audit.publish(tx, ctx, {
+        aggregateTable: 'registry.patients',
+        aggregateId: patientId,
+        eventType: 'patient.inactivated',
+        payload: { status },
+      });
+    });
+    return this.get(ctx, patientId);
+  }
+
+  async reactivate(ctx: RequestContext, patientId: string): Promise<Patient> {
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const patient = await this.findPatient(tx, ctx, patientId, true);
+      if (patient.status === 'deceased') {
+        throw AppError.conflict('Paciente com óbito registrado não pode ser reativado.');
+      }
+      if (patient.status === 'active') throw AppError.conflict('O cadastro deste paciente já está ativo.');
+
+      await tx.query(
+        `UPDATE registry.patients
+            SET status = 'active', inactive_reason = NULL, inactivated_at = NULL, inactivated_by = NULL,
+                updated_by = $3, row_version = row_version + 1
+          WHERE id = $1 AND tenant_id = $2`,
+        [patientId, ctx.tenantId, ctx.user.id],
+      );
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'patient.reactivate',
+        entitySchema: 'registry',
+        entityTable: 'patients',
+        entityId: patientId,
+        before: { status: patient.status },
+        after: { status: 'active' },
+      });
+      await this.audit.publish(tx, ctx, {
+        aggregateTable: 'registry.patients',
+        aggregateId: patientId,
+        eventType: 'patient.reactivated',
+      });
+    });
+    return this.get(ctx, patientId);
   }
 
   /** Pesagem, com ou sem atendimento (recepção pesa na entrada). */
