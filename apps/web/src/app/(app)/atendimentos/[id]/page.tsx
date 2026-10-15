@@ -418,7 +418,7 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
         </div>
       )}
 
-      <div className="grid gap-4 md:gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <aside className="space-y-4 md:space-y-5 lg:sticky lg:top-[calc(var(--header-h)+16px)] lg:col-start-2 lg:row-start-1">
           <PatientSummaryCard
             patientId={encounter.patient.id}

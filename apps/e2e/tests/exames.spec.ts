@@ -40,7 +40,7 @@ test('resultado com laudo em PDF, revisão e retificação', async ({ page, api 
   await expect(page.locator('main h1').first()).toContainText(`Exames de ${name}`);
   await expectNoHorizontalOverflow(page);
 
-  await page.locator('button[aria-expanded]').first().click();
+  await page.getByRole('button', { name: /pedido nº/ }).first().click();
   await page.getByRole('button', { name: 'Lançar resultado' }).click();
   const sheet = page.getByRole('dialog');
   await sheet.getByLabel('Conclusão').fill('Anemia discreta, sem alteração de plaquetas.');
@@ -78,7 +78,7 @@ test('pedido sem resultado é cancelado com motivo', async ({ page, api }) => {
 
   await page.goto(`/exames?pacienteId=${patientId}`);
   await settle(page);
-  await page.locator('button[aria-expanded]').first().click();
+  await page.getByRole('button', { name: /pedido nº/ }).first().click();
   await page.getByRole('button', { name: 'Cancelar pedido' }).click();
   const sheet = page.getByRole('dialog');
   await sheet.getByLabel('Motivo').fill('Pedido em duplicidade');

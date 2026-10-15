@@ -199,7 +199,7 @@ export default function GuardianPage({ params }: { params: Promise<{ id: string 
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_1.2fr] md:gap-5">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] md:gap-5">
         <Card>
           <CardHeader title="Contato" />
           <dl className="px-4 py-2">

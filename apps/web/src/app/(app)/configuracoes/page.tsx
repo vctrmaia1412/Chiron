@@ -15,7 +15,8 @@ import { MembersPanel } from '@/components/settings/members-panel';
 import { CatalogPanel } from '@/components/settings/catalog-panel';
 
 interface Entitlement {
-  moduleKey: ModuleKey;
+  // a API devolve `key`; ler `moduleKey` mostrava todo módulo como desligado
+  key: ModuleKey;
   state: 'active' | 'trial' | 'suspended' | 'disabled';
   source: string;
   expiresAt: string | null;
@@ -84,7 +85,7 @@ function OrganizationPanel() {
   });
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2 md:gap-5">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 md:gap-5">
       <Card>
         <CardHeader title="Dados da organização" />
         <div className="space-y-3 px-4 py-4">
@@ -165,7 +166,7 @@ function ModulesPanel() {
 
   if (isLoading) return <Card><ListSkeleton rows={6} /></Card>;
 
-  const byKey = new Map((data?.items ?? []).map((item) => [item.moduleKey, item]));
+  const byKey = new Map((data?.items ?? []).map((item) => [item.key, item]));
 
   return (
     <Card>

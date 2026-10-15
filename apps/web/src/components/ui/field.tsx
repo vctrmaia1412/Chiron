@@ -78,14 +78,16 @@ export function Field({ label, hint, error, required, children, className, htmlF
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
       {label && (
-        <label htmlFor={controlId} className="text-[13px] font-medium text-[var(--ink-2)]">
-          {label}
+        // O asterisco fica fora do <label>: o nome do campo continua "Nome", e
+        // não "Nome*", para leitor de tela e para quem procura o campo pelo rótulo.
+        <span className="text-[13px] font-medium text-[var(--ink-2)]">
+          <label htmlFor={controlId}>{label}</label>
           {required && (
             <span aria-hidden className="ml-0.5 text-[var(--danger)]">
               *
             </span>
           )}
-        </label>
+        </span>
       )}
       {content}
       {error ? (

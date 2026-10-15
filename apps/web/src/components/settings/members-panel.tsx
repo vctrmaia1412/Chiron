@@ -84,7 +84,7 @@ export function MembersPanel() {
   const members = data?.items ?? [];
 
   return (
-    <div className="grid gap-4 md:gap-5 lg:grid-cols-[1.4fr_1fr]">
+    <div className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       <div className="grid min-w-0 content-start gap-4 md:gap-5">
         <Card>
           <CardHeader

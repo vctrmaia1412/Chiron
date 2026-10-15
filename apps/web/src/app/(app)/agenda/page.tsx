@@ -223,7 +223,7 @@ function AgendaView() {
         ]}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <Card>
           {error ? (
             <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />

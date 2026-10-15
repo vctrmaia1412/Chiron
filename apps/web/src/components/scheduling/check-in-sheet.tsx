@@ -80,10 +80,12 @@ function CheckInSheetContent({
       <div className="space-y-4">
         <Field
           label="Peso aferido"
+          htmlFor="checkin-peso"
           hint="Opcional aqui, obrigatório para prescrever dose por quilo."
         >
           <div className="flex gap-2">
             <Input
+              id="checkin-peso"
               autoFocus
               value={weight}
               onChange={(event) => setWeight(event.target.value)}
@@ -93,6 +95,7 @@ function CheckInSheetContent({
             <Select
               value={weightUom}
               onChange={(event) => setWeightUom(event.target.value as 'kg' | 'g')}
+              aria-label="Unidade do peso"
               className="w-24"
             >
               <option value="kg">kg</option>

@@ -254,7 +254,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr] md:gap-5">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] md:gap-5">
         <div className="space-y-4 md:space-y-5">
           <Card>
             <CardHeader
@@ -582,16 +582,17 @@ function WeightSheet({
         </>
       }
     >
-      <Field label="Peso" required>
+      <Field label="Peso" required htmlFor="peso-novo">
         <div className="flex gap-2">
           <Input
+            id="peso-novo"
             autoFocus
             value={value}
             onChange={(event) => setValue(event.target.value)}
             inputMode="decimal"
             placeholder={uom === 'g' ? '92' : '8,4'}
           />
-          <Select value={uom} onChange={(event) => setUom(event.target.value as 'kg' | 'g')} className="w-24">
+          <Select value={uom} aria-label="Unidade do peso" onChange={(event) => setUom(event.target.value as 'kg' | 'g')} className="w-24">
             <option value="kg">kg</option>
             <option value="g">g</option>
           </Select>

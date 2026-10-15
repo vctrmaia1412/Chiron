@@ -68,7 +68,7 @@ export default function DashboardPage() {
 
           {data.alerts.length > 0 && <AlertsRow alerts={data.alerts} />}
 
-          <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr] md:gap-5">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] md:gap-5">
             <TodayAgenda agenda={data.agenda} />
             <div className="space-y-4 md:space-y-5">
               <OpenEncounters encounters={data.openEncounters} />

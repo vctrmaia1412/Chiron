@@ -101,7 +101,7 @@ test('consulta completa: registro, diagnóstico, receita assinada, vacina e fina
   const whatsapp = page.getByRole('link', { name: 'Enviar orientações pelo WhatsApp' });
   await expect(whatsapp).toHaveAttribute('href', /wa\.me\/5511988124471/);
   await page.getByRole('dialog').getByRole('button', { name: 'Fechar', exact: true }).last().click();
-  await expect(page.getByText('Finalizado').first()).toBeVisible();
+  await expect(page.getByText('Finalizado').locator('visible=true').first()).toBeVisible();
 
   // o que foi feito aparece no resumo do próximo atendimento
   const next = await api.post<{ id: string }>('/encounters', {

@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, expectNoHorizontalOverflow, settle, test, uniqueName, type Api } from './fixtures';
+import { expect, expectNoHorizontalOverflow, settle, submitScheduling, test, uniqueName, type Api } from './fixtures';
 
 /**
  * Um dia de recepção: cliente novo liga, é cadastrado e agendado; chega,
@@ -91,8 +91,7 @@ test('cliente novo: cadastra tutor e animal juntos e agenda pela ficha', async (
   await form.getByLabel('Data').fill(todayIso(1));
   await form.getByLabel('Horário').fill('16:47');
   await form.getByLabel('Motivo').fill('Vacinação anual');
-  await form.getByRole('button', { name: 'Agendar', exact: true }).click();
-  await expect(page.getByText('Agendamento criado.').first()).toBeVisible();
+  await submitScheduling(page, 'Agendar', 'Agendamento criado.');
 
   await page.goto('/agenda');
   await settle(page);
@@ -176,8 +175,7 @@ test('remarca pela agenda e o horário muda na lista', async ({ page, api }) => 
   await expect(form.getByText('Remarcar').first()).toBeVisible();
   await form.getByLabel('Data').fill(todayIso(2));
   await form.getByLabel('Horário').fill('10:53');
-  await form.getByRole('button', { name: 'Salvar novo horário' }).click();
-  await expect(page.getByText('Agendamento remarcado.').first()).toBeVisible();
+  await submitScheduling(page, 'Salvar novo horário', 'Agendamento remarcado.');
 
   // a agenda vai para o dia novo e mostra o horário novo
   await settle(page);
@@ -232,8 +230,7 @@ test('retorno pedido pelo veterinário é agendado pela recepção e sai da list
   await expect(form.getByLabel('Data')).toHaveValue(todayIso(10));
   await form.getByLabel('Profissional').selectOption({ index: 1 });
   await form.getByLabel('Horário').fill('15:37');
-  await form.getByRole('button', { name: 'Agendar', exact: true }).click();
-  await expect(page.getByText('Agendamento criado.').first()).toBeVisible();
+  await submitScheduling(page, 'Agendar', 'Agendamento criado.');
 
   await expect(page.locator('li', { hasText: animal }).filter({ hasText: 'Agendar retorno' })).toHaveCount(0);
   await expect(page.getByText(`Nenhum retorno para "${animal}"`)).toBeVisible();

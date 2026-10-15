@@ -145,3 +145,22 @@ export function uniqueName(prefix: string): string {
 export function visibleButton(page: Page, name: string) {
   return page.getByRole('button', { name, exact: true }).locator('visible=true').first();
 }
+
+/**
+ * Salva o agendamento e, se o horário já estiver ocupado para o profissional
+ * (o banco de demonstração é compartilhado entre execuções), usa o encaixe
+ * que a própria tela oferece.
+ */
+export async function submitScheduling(page: Page, buttonName: string, successText: string): Promise<void> {
+  const form = page.getByRole('dialog');
+  await form.getByRole('button', { name: buttonName, exact: true }).click();
+  const success = page.getByText(successText).first();
+  const overlap = form.getByLabel('Agendar mesmo assim (encaixe)');
+  await expect(success.or(overlap)).toBeVisible();
+  if (await overlap.isVisible()) {
+    await overlap.check();
+    await form.getByRole('button', { name: buttonName, exact: true }).click();
+  }
+  await expect(success).toBeVisible();
+}
+

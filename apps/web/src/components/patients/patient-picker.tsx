@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Plus, Search, X } from 'lucide-react';
 import type { PatientListItem } from '@chiron/contracts';
@@ -36,6 +36,7 @@ export function PatientPicker({
   const [debounced, setDebounced] = useState('');
   const [focused, setFocused] = useState(false);
   const [creating, setCreating] = useState(false);
+  const inputId = useId();
   const { can } = useSession();
   const canCreate = allowCreate && can('patient:create');
 
@@ -81,10 +82,11 @@ export function PatientPicker({
 
   return (
     <>
-    <Field label={label} error={error}>
+    <Field label={label} error={error} htmlFor={inputId}>
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-3)]" />
         <Input
+          id={inputId}
           data-sheet-ignore
           value={term}
           onChange={(event) => setTerm(event.target.value)}

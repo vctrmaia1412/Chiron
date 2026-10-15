@@ -400,9 +400,14 @@ function PatientFormSheetContent({
           <section className="space-y-3">
             <SectionTitle>Dados iniciais</SectionTitle>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label={`Peso (${weightUom})`} hint="Registrado como primeira medida do histórico.">
+              <Field
+                label={`Peso (${weightUom})`}
+                htmlFor="paciente-peso"
+                hint="Registrado como primeira medida do histórico."
+              >
                 <div className="flex gap-2">
                   <Input
+                    id="paciente-peso"
                     value={weight}
                     onChange={(event) => setWeight(event.target.value)}
                     inputMode="decimal"
@@ -410,6 +415,7 @@ function PatientFormSheetContent({
                   />
                   <Select
                     value={weightUom}
+                    aria-label="Unidade do peso"
                     onChange={(event) => setWeightUom(event.target.value as 'kg' | 'g')}
                     className="w-20"
                   >
