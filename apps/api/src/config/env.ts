@@ -67,6 +67,10 @@ const baseEnvSchema = z.object({
 
   RATE_LIMIT_LOGIN_PER_MIN: z.coerce.number().int().default(10),
   RATE_LIMIT_PUBLIC_PER_MIN: z.coerce.number().int().default(60),
+  // Cota de quem chega com cookie de sessão, por IP. Uma clínica inteira sai
+  // por um IP só, e uma tela de atendimento faz dez requisições ao abrir: a
+  // cota anônima de 60 por minuto travaria a equipe no meio da consulta.
+  RATE_LIMIT_AUTHENTICATED_PER_MIN: z.coerce.number().int().default(600),
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 

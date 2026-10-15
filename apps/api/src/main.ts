@@ -126,15 +126,28 @@ async function registerRateLimit(app: NestFastifyApplication, cfg: Env): Promise
   );
   const probePaths = new Set([`${prefix}/health`, `${prefix}/ready`]);
 
+  // Três classes de cota, cada uma com contador próprio por IP: login (argon2id),
+  // uso autenticado (a clínica inteira atrás de um IP só) e tráfego anônimo.
+  // Quem forjar um cookie qualquer só troca de classe: continua limitado por IP,
+  // e a sessão inválida é recusada pelo guard logo em seguida.
+  const sessionCookie = new RegExp(`(?:^|;\\s*)${cfg.COOKIE_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=`);
+  const rateClass = (request: FastifyRequest): 'auth' | 'session' | 'public' => {
+    if (authPaths.has(routePath(request))) return 'auth';
+    return sessionCookie.test(request.headers.cookie ?? '') ? 'session' : 'public';
+  };
+  const rateMax = {
+    auth: cfg.RATE_LIMIT_LOGIN_PER_MIN,
+    session: cfg.RATE_LIMIT_AUTHENTICATED_PER_MIN,
+    public: cfg.RATE_LIMIT_PUBLIC_PER_MIN,
+  };
+
   await app.register(fastifyRateLimit as never, {
     global: true,
     timeWindow: '1 minute',
-    max: (request: FastifyRequest) =>
-      authPaths.has(routePath(request)) ? cfg.RATE_LIMIT_LOGIN_PER_MIN : cfg.RATE_LIMIT_PUBLIC_PER_MIN,
-    // Contadores separados por classe de rota: usar a aplicação não pode gastar
-    // a cota de login, e tentar login não pode derrubar o resto da sessão.
-    keyGenerator: (request: FastifyRequest) =>
-      authPaths.has(routePath(request)) ? `auth:${request.ip}` : request.ip,
+    max: (request: FastifyRequest) => rateMax[rateClass(request)],
+    // Contadores separados por classe: usar a aplicação não gasta a cota de
+    // login, e tráfego anônimo não consome a cota da equipe logada.
+    keyGenerator: (request: FastifyRequest) => `${rateClass(request)}:${request.ip}`,
     // Fora da cota: o preflight do navegador é barato e vem em dobro com a
     // requisição real, e as sondas do orquestrador batem em intervalo curto.
     allowList: (request: FastifyRequest) =>
