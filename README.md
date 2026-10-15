@@ -111,6 +111,9 @@ estado vem da API. O navegador não guarda prontuário.
 - [`docs/PLANO_DE_LANCAMENTO.md`](docs/PLANO_DE_LANCAMENTO.md): o que falta
   para vender, como colocar no ar sem custo, até onde a pilha gratuita
   sustenta e como escalar. Fonte de verdade da próxima etapa.
+- [`docs/DEPLOY_GRATUITO.md`](docs/DEPLOY_GRATUITO.md): colocar no ar de graça
+  (Oracle Cloud Always Free, domínio DuckDNS, HTTPS automático e backup fora
+  da VM), passo a passo, para o piloto.
 - [`docs/adr/`](docs/adr/): decisões arquiteturais com contexto e alternativas.
 - [`docs/CHIRON_MASTER_ANALYSIS.md`](docs/CHIRON_MASTER_ANALYSIS.md): análise
   que originou o projeto.

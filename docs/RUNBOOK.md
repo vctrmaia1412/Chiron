@@ -15,6 +15,12 @@ dc ps                       # o que está de pé
 dc logs -f --tail=100 api   # log ao vivo de um serviço
 ```
 
+Na VM pública montada pelo `docs/DEPLOY_GRATUITO.md`, use
+`bash infra/scripts/dc.sh` no lugar de `dc` em todo este documento. Ele já
+inclui a sobreposição `docker-compose.publico.yml` e o `.env.stack`. Lá, o
+Postgres publica a porta 5432 e o MinIO a 9000, ambos só no `127.0.0.1`; a
+conferência `http://localhost:8080` continua valendo.
+
 Acesso ao banco pelo contêiner, sem senha na linha de comando:
 
 ```bash
@@ -101,6 +107,12 @@ infra/scripts/restore.sh /var/tmp/chiron-20260817T031000Z.dump.age
 
 O script decifra, restaura e roda a guarda de RLS no fim. Se a guarda reprovar,
 não aponte a aplicação para esse banco.
+
+Sem `pnpm` no servidor, a guarda roda pelo contêiner da API via
+`RLS_GUARD_CMD`, com `-e DATABASE_MIGRATION_URL=...` e `-e DATABASE_URL=...`
+apontando para `postgres:5432/chiron_restaurado`. Sem os `-e`, ela confere o
+banco que está no ar, não o restaurado. A linha completa está em
+`docs/DEPLOY_GRATUITO.md`, seção 11.4.
 
 O Postgres da pilha não publica porta. Para o host alcançá-lo, publique no
 loopback (`ports: ["127.0.0.1:5432:5432"]` no serviço `postgres`) ou rode o
@@ -447,3 +459,9 @@ Cron sugerido, fora do horário da clínica:
 O cron roda no host, então valem os mesmos pré-requisitos da seção 3: o
 Postgres precisa estar alcançável pelo host (porta publicada no loopback ou
 script em contêiner na rede `chiron`), e `pg_dump`, `age` e `rclone` instalados.
+
+Na VM pública tudo isso já vem pronto: o `bootstrap-vm.sh` instala as
+ferramentas, a sobreposição publica as portas no loopback e o
+`infra/scripts/backup-vm.sh` monta as variáveis a partir do `.env.stack` e do
+`.env.backup`. O agendamento é `bash infra/scripts/backup-vm.sh --agendar`
+(ver `docs/DEPLOY_GRATUITO.md`, seção 11).

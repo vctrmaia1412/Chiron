@@ -1024,6 +1024,24 @@ Verificação técnica no código versus item que exige parecer:
 
 ## 8. Como colocar no ar sem custo
 
+> **Atualização de 15/10/2026.** O passo a passo executável do plano A, para
+> o piloto de 1 a 3 clínicas, está em `docs/DEPLOY_GRATUITO.md`, com scripts
+> em `infra/scripts` e a sobreposição `infra/compose/docker-compose.publico.yml`.
+> Em relação a esta seção, mudou:
+>
+> - A1 confirmada em 2 OCPU e 12 GB na página oficial.
+> - A imagem `minio/minio` saiu do Docker Hub e o projeto foi arquivado. A
+>   sobreposição usa `cgr.dev/chainguard/minio`, e os documentos ficam no
+>   MinIO da própria VM, servidos na mesma origem pelo Caddy. O OCI Object
+>   Storage fica para depois.
+> - O serviço `migrate` não subia com `APP_ENV=prod`, porque não recebia as
+>   variáveis das invariantes de produção. Corrigido na sobreposição.
+> - O domínio grátis é o DuckDNS. Sem domínio com DNS editável não há
+>   Resend, então o caminho 100% grátis roda em "modo piloto"
+>   (`APP_ENV=homolog`), com os links de convite no log.
+> - O Resend Free agora permite 3 domínios.
+> - A Koyeb pede cartão com pré-autorização de US$ 29.
+
 ### 8.1 Princípios
 
 - Custo zero de verdade, com uso comercial permitido pelos termos do provedor

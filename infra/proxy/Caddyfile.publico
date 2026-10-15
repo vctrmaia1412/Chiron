@@ -1,0 +1,29 @@
+# Proxy do CHIRON exposto na internet, com HTTPS automático.
+#
+# Usado pela sobreposição infra/compose/docker-compose.publico.yml. O Caddy
+# pede e renova sozinho o certificado Let's Encrypt de CHIRON_DOMAIN, desde
+# que o DNS do domínio aponte para esta máquina e as portas 80 e 443 estejam
+# abertas (lista de segurança da VCN e firewall do sistema). Guia completo em
+# docs/DEPLOY_GRATUITO.md.
+#
+# Variáveis (vêm do .env.stack pela sobreposição):
+#   CHIRON_DOMAIN  nome público, sem https:// (ex.: chiron-piloto.duckdns.org)
+#   ACME_EMAIL     e-mail que recebe os avisos do Let's Encrypt
+#   S3_BUCKET      bucket dos documentos, exposto em /<bucket>/
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+
+{$CHIRON_DOMAIN} {
+	# Navegador passa a recusar HTTP para este domínio por um ano.
+	header Strict-Transport-Security "max-age=31536000"
+
+	import /etc/caddy/chiron/rotas-publicas.caddy
+}
+
+# Porta só para conferências de dentro da própria VM (a sobreposição publica
+# 8080 apenas no 127.0.0.1): curl http://localhost:8080/api/v1/ready
+http://:8080 {
+	import /etc/caddy/chiron/rotas-publicas.caddy
+}
