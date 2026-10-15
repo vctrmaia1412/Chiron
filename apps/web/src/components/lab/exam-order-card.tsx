@@ -14,7 +14,16 @@ import { Badge } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { ExamResultSheet } from './exam-result-sheet';
 
-export function ExamOrderCard({ order, showPatient }: { order: ExamOrder; showPatient?: boolean }) {
+export function ExamOrderCard({
+  order,
+  showPatient,
+  hideHeader,
+}: {
+  order: ExamOrder;
+  showPatient?: boolean;
+  /** Dentro de uma linha que já mostra número, situação e data. */
+  hideHeader?: boolean;
+}) {
   const queryClient = useQueryClient();
   const { can } = useSession();
   const [resultTarget, setResultTarget] = useState<ExamOrderItem | null>(null);
@@ -43,7 +52,9 @@ export function ExamOrderCard({ order, showPatient }: { order: ExamOrder; showPa
   return (
     <>
       <article className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
-        <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3.5 py-2.5">
+        <header
+          className={`flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3.5 py-2.5 ${hideHeader ? 'hidden' : ''}`}
+        >
           <span className="text-[13px] font-semibold text-[var(--ink)] tabular">Pedido nº {order.number}</span>
           <Badge tone={status.tone}>{status.label}</Badge>
           {order.priority !== 'routine' && (

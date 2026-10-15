@@ -39,6 +39,7 @@ export class ExamsController {
     @Query('status') status?: string,
     @Query('pending') pending?: string,
     @Query('limit') limit?: string,
+    @Query('q') q?: string,
   ) {
     return this.exams.list(ctxOf(req), {
       patientId,
@@ -46,6 +47,7 @@ export class ExamsController {
       status,
       pending: pending === 'true' || pending === '1',
       limit: Math.min(Number(limit ?? 50) || 50, 200),
+      q: q?.trim().slice(0, 80) || undefined,
     });
   }
 

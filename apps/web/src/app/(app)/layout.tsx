@@ -7,6 +7,7 @@ import { useSession } from '@/lib/session';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { MobileNav } from '@/components/layout/mobile-nav';
+import { ActiveEncounterPill } from '@/components/clinical/active-encounter-pill';
 import { Spinner } from '@/components/ui/primitives';
 import { Logo } from '@/components/brand/logo';
 
@@ -64,6 +65,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Topbar />
         <main className="min-w-0 flex-1 px-4 pb-[calc(var(--mobilenav-h)+env(safe-area-inset-bottom)+16px)] pt-4 md:px-6 md:pt-6 lg:pb-10">
           {children}
+          <ActiveEncounterPill />
         </main>
       </div>
       <MobileNav />

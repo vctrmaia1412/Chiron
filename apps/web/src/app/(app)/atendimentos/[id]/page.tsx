@@ -2,13 +2,17 @@
 
 import { use, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   CheckCircle2,
   FlaskConical,
+  History,
+  PawPrint,
   Pause,
   Pill,
   Play,
@@ -39,6 +43,8 @@ import { EncounterExams } from '@/components/clinical/encounter-exams';
 import { EncounterImmunizations } from '@/components/clinical/encounter-immunizations';
 import { PatientSummaryCard } from '@/components/clinical/patient-summary';
 import { EncounterActionBar, type BarAction } from '@/components/clinical/encounter-action-bar';
+import { PatientHistorySheet } from '@/components/clinical/patient-history-sheet';
+import { NAV_ITEMS } from '@/components/layout/navigation';
 
 type SheetKey = 'vitals' | 'diagnosis' | 'procedure' | 'finish' | 'more' | null;
 
@@ -53,10 +59,12 @@ const OPEN_STATUSES = ['arrived', 'triaged', 'in_progress', 'on_hold'];
  */
 export default function EncounterPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { can, hasModule } = useSession();
 
   const [sheet, setSheet] = useState<SheetKey>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [prescriptionOpen, setPrescriptionOpen] = useState(false);
   const [vaccineOpen, setVaccineOpen] = useState(false);
   const [examOpen, setExamOpen] = useState(false);
@@ -136,6 +144,13 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
     transition.mutate('start');
   }
 
+  // Voltar leva para onde o veterinário estava (painel, ficha, fila). Aberto
+  // por link direto, sem histórico, cai na fila de atendimentos.
+  function goBack() {
+    if (window.history.length > 1) router.back();
+    else router.push('/atendimentos');
+  }
+
   async function openFinish() {
     setFinishing(true);
     try {
@@ -187,8 +202,58 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
       ? { label: 'Iniciar', kind: 'start' as const, onClick: () => transition.mutate('start'), loading: transition.isPending }
       : undefined;
 
+  const patientLine = [
+    encounter.patient.speciesName,
+    encounter.patient.breedName,
+    encounter.patient.ageLabel,
+    formatWeight(weight),
+    encounter.guardianName,
+    encounter.serviceName,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
     <>
+      {/* Celular: cabeçalho fixo com saída clara e consulta ao histórico. O
+          título grande do computador ocuparia meia tela aqui. */}
+      <div className="sticky top-[var(--header-h)] z-10 -mx-4 -mt-4 mb-3 border-b border-[var(--border)] bg-[var(--bg)]/95 px-2 py-1.5 backdrop-blur lg:hidden">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={goBack}
+            aria-label="Voltar"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius)] text-[var(--ink-2)] active:bg-[var(--surface-2)]"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <Link href={`/pacientes/${encounter.patient.id}`} className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="truncate text-[17px] font-semibold text-[var(--ink)]">{encounter.patient.name}</span>
+              <Badge tone={status.tone} dot={encounter.status === 'in_progress'}>
+                {status.label}
+              </Badge>
+            </span>
+            <span className="block truncate text-[12px] text-[var(--ink-3)]">{patientLine}</span>
+          </Link>
+          <button
+            type="button"
+            onClick={() => setHistoryOpen(true)}
+            className="flex h-11 shrink-0 flex-col items-center justify-center rounded-[var(--radius)] px-2 text-[11px] font-medium text-[var(--brand)] active:bg-[var(--surface-2)]"
+          >
+            <History className="h-5 w-5" />
+            Histórico
+          </button>
+        </div>
+      </div>
+
+      {encounter.status === 'finished' && can('encounter:reopen') && (
+        <div className="mb-3 flex justify-end lg:hidden">
+          <ReopenButton encounterId={encounter.id} />
+        </div>
+      )}
+
+      <div className="hidden lg:block">
       <PageHeader
         breadcrumb={
           <span className="flex items-center gap-1.5">
@@ -209,16 +274,7 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
             </Badge>
           </span>
         }
-        description={[
-          encounter.patient.speciesName,
-          encounter.patient.breedName,
-          encounter.patient.ageLabel,
-          formatWeight(weight),
-          encounter.guardianName,
-          encounter.serviceName,
-        ]
-          .filter(Boolean)
-          .join(' · ')}
+        description={patientLine}
         actions={
           <>
             <span className="hidden flex-wrap gap-2 lg:flex">
@@ -253,6 +309,10 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
               )}
             </span>
             {encounter.status === 'finished' && can('encounter:reopen') && <ReopenButton encounterId={encounter.id} />}
+            <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(true)}>
+              <History className="h-4 w-4" />
+              Histórico
+            </Button>
             <Button asChild variant="ghost" size="sm">
               <Link href={`/pacientes/${encounter.patient.id}/prontuario`}>
                 <ScrollText className="h-4 w-4" />
@@ -262,6 +322,7 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
           </>
         }
       />
+      </div>
 
       {(activeAllergies.length > 0 || activeAlerts.length > 0) && (
         <div className="mb-4 flex flex-wrap gap-2">
@@ -521,33 +582,61 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
 
       <EncounterActionBar
         actions={barActions}
-        onMore={writable ? () => setSheet('more') : undefined}
+        onMore={() => setSheet('more')}
         primary={primary}
         patientId={encounter.patient.id}
       />
 
-      <Sheet open={sheet === 'more'} onOpenChange={(next) => setSheet(next ? 'more' : null)} title="Mais ações" size="sm">
-        <ul className="space-y-1">
-          {moreActions.map((action) => {
-            const Icon = action.icon;
-            return (
-              <li key={action.key}>
-                <button
-                  type="button"
+      <Sheet open={sheet === 'more'} onOpenChange={(next) => setSheet(next ? 'more' : null)} title="Mais" size="sm">
+        <div className="space-y-4">
+          {writable && moreActions.length > 0 && (
+            <MenuSection title="Neste atendimento">
+              {moreActions.map((action) => (
+                <MenuButton
+                  key={action.key}
+                  icon={action.icon}
+                  label={action.label}
                   onClick={() => {
                     setSheet(null);
                     action.onClick();
                   }}
-                  className="flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-3 text-left text-[15px] font-medium text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
-                >
-                  <Icon className="h-5 w-5 text-[var(--ink-3)]" />
-                  {action.label}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                />
+              ))}
+            </MenuSection>
+          )}
+
+          <MenuSection title="Consultar">
+            <MenuButton
+              icon={History}
+              label="Histórico: exames, consultas, vacinas e receitas"
+              onClick={() => {
+                setSheet(null);
+                setHistoryOpen(true);
+              }}
+            />
+            <MenuLink icon={PawPrint} label={`Ficha de ${encounter.patient.name}`} href={`/pacientes/${encounter.patient.id}`} />
+            <MenuLink icon={ScrollText} label="Prontuário completo" href={`/pacientes/${encounter.patient.id}/prontuario`} />
+          </MenuSection>
+
+          <MenuSection title="Ir para">
+            {NAV_ITEMS.filter((item) => hasModule(item.module) && can(item.permission)).map((item) => (
+              <MenuLink key={item.href} icon={item.icon} label={item.label} href={item.href} />
+            ))}
+          </MenuSection>
+          <p className="px-3 text-[12px] text-[var(--ink-3)]">
+            O que você escreveu fica salvo. Para voltar a este atendimento, toque no aviso &quot;Em atendimento&quot; no
+            rodapé de qualquer tela.
+          </p>
+        </div>
       </Sheet>
+
+      <PatientHistorySheet
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        patientId={encounter.patient.id}
+        patientName={encounter.patient.name}
+        currentEncounterId={encounter.id}
+      />
 
       <VitalsSheet
         open={sheet === 'vitals'}
@@ -580,6 +669,56 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
 
       <AmendNoteSheet encounterId={encounter.id} noteId={amendTarget} onClose={() => setAmendTarget(null)} />
     </>
+  );
+}
+
+function MenuSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-1 px-3 text-[11.5px] font-semibold uppercase tracking-wider text-[var(--ink-3)]">{title}</h3>
+      <ul className="space-y-0.5">{children}</ul>
+    </section>
+  );
+}
+
+const menuItemClass =
+  'flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-3 text-left text-[15px] font-medium text-[var(--ink-2)] hover:bg-[var(--surface-2)] active:bg-[var(--surface-2)]';
+
+function MenuButton({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <li>
+      <button type="button" onClick={onClick} className={menuItemClass}>
+        <Icon className="h-5 w-5 shrink-0 text-[var(--ink-3)]" />
+        {label}
+      </button>
+    </li>
+  );
+}
+
+function MenuLink({
+  icon: Icon,
+  label,
+  href,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  href: string;
+}) {
+  return (
+    <li>
+      <Link href={href} className={menuItemClass}>
+        <Icon className="h-5 w-5 shrink-0 text-[var(--ink-3)]" />
+        {label}
+      </Link>
+    </li>
   );
 }
 

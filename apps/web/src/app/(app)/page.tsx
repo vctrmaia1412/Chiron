@@ -20,12 +20,10 @@ export default function DashboardPage() {
     refetchInterval: 60_000,
   });
 
-  const firstName = context?.user.name.split(' ')[0] ?? '';
-
   return (
     <>
       <PageHeader
-        title={`Bom dia, ${firstName}`}
+        title={`${greeting(new Date().getHours())}, ${shortName(context?.user.name ?? '')}`}
         description={data ? capitalize(formatWeekday(`${data.date}T12:00:00`)) : undefined}
         actions={
           <>
@@ -85,6 +83,20 @@ export default function DashboardPage() {
 
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function greeting(hour: number): string {
+  if (hour < 12) return 'Bom dia';
+  if (hour < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
+/** Primeiro nome, mantendo o título quando houver: "Dr. Rafael Nogueira" vira "Dr. Rafael". */
+function shortName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  const title = /^(dr|dra|drª|prof|profa)\.?$/i.test(parts[0] ?? '');
+  return (title ? parts.slice(0, 2) : parts.slice(0, 1)).join(' ');
 }
 
 /**

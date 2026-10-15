@@ -3,17 +3,30 @@
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { FlaskConical } from 'lucide-react';
+import { FlaskConical, Search } from 'lucide-react';
 import type { ExamOrder } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
+import { useDebounced } from '@/lib/use-debounced';
 import { Card, EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/ui/primitives';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/field';
 import { FilterChips } from '@/components/ui/tabs';
-import { ExamOrderCard } from '@/components/lab/exam-order-card';
+import { ExamOrderRow } from '@/components/lab/exam-order-row';
 
+const PAGE = 20;
+
+/**
+ * Pedidos em linhas compactas, com busca pelo nome do paciente e carga em
+ * blocos de vinte. Tocar no pedido abre resultados e ações no lugar. A lista
+ * cabe na tela do celular em vez de virar dezenas de telas de cartões.
+ */
 function ExamsList() {
   const params = useSearchParams();
   const patientId = params.get('pacienteId') ?? undefined;
-  const [filter, setFilter] = useState(params.get('pendentes') ? 'pendentes' : 'todos');
+  const [filter, setFilter] = useState(params.get('pendentes') ? 'pendentes' : patientId ? 'todos' : 'pendentes');
+  const [search, setSearch] = useState('');
+  const [limit, setLimit] = useState(PAGE);
+  const q = useDebounced(search.trim(), 300);
 
   const query = (() => {
     switch (filter) {
@@ -30,24 +43,43 @@ function ExamsList() {
     }
   })();
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['exam-orders', 'list', filter, patientId],
-    queryFn: () => api.get<{ items: ExamOrder[] }>('/exam-orders', { ...query, patientId, limit: 60 }),
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
+    queryKey: ['exam-orders', 'list', filter, patientId, q, limit],
+    queryFn: () =>
+      api.get<{ items: ExamOrder[] }>('/exam-orders', { ...query, patientId, q: q || undefined, limit }),
+    placeholderData: (previous) => previous,
   });
 
   const items = data?.items ?? [];
+  const mayHaveMore = items.length >= limit;
 
   return (
     <>
-      <PageHeader
-        title="Exames"
-        description="Pedidos, coletas e resultados. Resultado liberado não é sobrescrito: retificação cria nova versão."
-      />
+      <PageHeader title="Exames" description="Pedidos, coletas e resultados. Toque num pedido para ver o resultado." />
+
+      {!patientId && (
+        <div className="relative mb-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-3)]" />
+          <Input
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setLimit(PAGE);
+            }}
+            placeholder="Buscar pelo nome do paciente"
+            aria-label="Buscar pelo nome do paciente"
+            className="pl-9"
+          />
+        </div>
+      )}
 
       <FilterChips
         className="mb-3"
         value={filter}
-        onChange={setFilter}
+        onChange={(next) => {
+          setFilter(next);
+          setLimit(PAGE);
+        }}
         items={[
           { key: 'pendentes', label: 'Pendentes' },
           { key: 'solicitados', label: 'Solicitados' },
@@ -69,16 +101,29 @@ function ExamsList() {
         <Card>
           <EmptyState
             icon={<FlaskConical className="h-7 w-7" />}
-            title="Nenhum pedido nesta lista"
+            title={q ? `Nenhum pedido para "${q}"` : 'Nenhum pedido nesta lista'}
             description="Os exames são solicitados dentro do atendimento."
           />
         </Card>
       ) : (
-        <div className="space-y-3">
-          {items.map((order) => (
-            <ExamOrderCard key={order.id} order={order} showPatient />
-          ))}
-        </div>
+        <>
+          <ul className="space-y-2">
+            {items.map((order) => (
+              <ExamOrderRow key={order.id} order={order} showPatient={!patientId} defaultOpen={Boolean(patientId) && items.length === 1} />
+            ))}
+          </ul>
+          {mayHaveMore && (
+            <Button
+              variant="secondary"
+              block
+              className="mt-3"
+              loading={isFetching}
+              onClick={() => setLimit((current) => current + PAGE)}
+            >
+              Carregar mais
+            </Button>
+          )}
+        </>
       )}
     </>
   );

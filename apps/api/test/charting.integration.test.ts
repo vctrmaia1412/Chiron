@@ -359,6 +359,47 @@ describe('registro rápido', () => {
     });
   });
 
+  describe('consulta pelo celular', () => {
+    it('histórico filtrado por tipo devolve só esses tipos, até o limite pedido', async () => {
+      const all = await client.request({ method: 'GET', url: `/patients/${patientId}/timeline?limit=50`, cookie: vet.cookie });
+      expect(all.status).toBe(200);
+      const wanted = ['prescription.signed', 'patient.created'];
+      expect(all.body.items.some((item: { kind: string }) => !wanted.includes(item.kind))).toBe(true);
+
+      const clinical = await client.request({
+        method: 'GET',
+        url: `/patients/${patientId}/timeline?limit=2&kinds=${wanted.join(',')}`,
+        cookie: vet.cookie,
+      });
+      expect(clinical.status).toBe(200);
+      expect(clinical.body.items).toHaveLength(2);
+      for (const item of clinical.body.items) {
+        expect(wanted).toContain(item.kind);
+      }
+    });
+
+    it('lista de exames busca pelo nome do paciente', async () => {
+      const catalog = await client.request({ method: 'GET', url: '/exam-catalog', cookie: vet.cookie });
+      const cbc = catalog.body.items.find((exam: { code: string }) => exam.code === 'CBC');
+      const ordered = await client.request({
+        method: 'POST',
+        url: '/exam-orders',
+        cookie: vet.cookie,
+        tenant: tenantId,
+        payload: { patientId, encounterId, items: [{ examCatalogId: cbc.id }] },
+      });
+      expect(ordered.status, JSON.stringify(ordered.body)).toBe(201);
+
+      const found = await client.request({ method: 'GET', url: '/exam-orders?q=pa%C3%A7oc', cookie: vet.cookie });
+      expect(found.status).toBe(200);
+      expect(found.body.items.length).toBeGreaterThan(0);
+      expect(found.body.items.every((order: { patient: { name: string } }) => order.patient.name === 'Paçoca')).toBe(true);
+
+      const none = await client.request({ method: 'GET', url: '/exam-orders?q=nao-existe-ninguem', cookie: vet.cookie });
+      expect(none.body.items).toHaveLength(0);
+    });
+  });
+
   describe('vacina por protocolo', () => {
     it('sabe a dose da vez e reaproveita o lote em uso', async () => {
       const before = await client.request({

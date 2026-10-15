@@ -4,18 +4,30 @@ import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Phone, Syringe } from 'lucide-react';
+import { CalendarPlus, Phone, Search, Syringe } from 'lucide-react';
 import type { DueItem, Immunization, PreventiveTreatment } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { addDays, formatDate, formatDateTime, formatPhone, toIsoDate, whatsappLink } from '@/lib/format';
 import { Badge, Card, CardHeader, EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Tabs } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/field';
+
+const PAGE = 20;
+
+function plain(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
 
 function ImmunizationsView() {
   const params = useSearchParams();
   const [tab, setTab] = useState<'pendentes' | 'aplicadas'>(params.get('pendentes') ? 'pendentes' : 'pendentes');
   const [horizon, setHorizon] = useState(30);
+  const [search, setSearch] = useState('');
+  const [visible, setVisible] = useState(PAGE);
 
   const due = useQuery({
     queryKey: ['immunizations', 'due', horizon],
@@ -34,6 +46,12 @@ function ImmunizationsView() {
     enabled: tab === 'aplicadas',
   });
 
+  const query = plain(search.trim());
+  const dueItems = (due.data?.items ?? []).filter(
+    (item) =>
+      !query || plain(item.patientName).includes(query) || plain(item.guardianName ?? '').includes(query),
+  );
+
   return (
     <>
       <PageHeader
@@ -51,6 +69,22 @@ function ImmunizationsView() {
         ]}
       />
 
+      {tab === 'pendentes' && (
+        <div className="relative mb-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-3)]" />
+          <Input
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setVisible(PAGE);
+            }}
+            placeholder="Buscar paciente ou tutor"
+            aria-label="Buscar paciente ou tutor"
+            className="pl-9"
+          />
+        </div>
+      )}
+
       {tab === 'pendentes' ? (
         <Card>
           <CardHeader
@@ -61,7 +95,10 @@ function ImmunizationsView() {
                   <button
                     key={days}
                     type="button"
-                    onClick={() => setHorizon(days)}
+                    onClick={() => {
+                      setHorizon(days);
+                      setVisible(PAGE);
+                    }}
                     className={`rounded-full px-2.5 py-1 text-[12.5px] font-medium ${
                       horizon === days
                         ? 'bg-[var(--brand-soft)] text-[var(--brand-ink)]'
@@ -78,15 +115,16 @@ function ImmunizationsView() {
             <ErrorState message={errorMessage(due.error)} onRetry={() => void due.refetch()} />
           ) : due.isLoading ? (
             <ListSkeleton rows={5} />
-          ) : (due.data?.items ?? []).length === 0 ? (
+          ) : dueItems.length === 0 ? (
             <EmptyState
               icon={<Syringe className="h-7 w-7" />}
-              title="Nenhuma dose pendente"
-              description={`Nada vencendo nos próximos ${horizon} dias.`}
+              title={search.trim() ? 'Ninguém encontrado' : 'Nenhuma dose pendente'}
+              description={search.trim() ? 'Confira o nome do paciente ou do tutor.' : `Nada vencendo nos próximos ${horizon} dias.`}
             />
           ) : (
+            <>
             <ul className="divide-y divide-[var(--border)]">
-              {(due.data?.items ?? []).map((item) => {
+              {dueItems.slice(0, visible).map((item) => {
                 const overdue = new Date(`${item.dueAt}T12:00:00`) < new Date();
                 const wa = whatsappLink(
                   item.guardianPhone,
@@ -107,15 +145,23 @@ function ImmunizationsView() {
                             {overdue ? 'Vencida' : 'A vencer'} {formatDate(item.dueAt)}
                           </Badge>
                         </div>
-                        <p className="truncate text-[13px] text-[var(--ink-2)]">{item.productName}</p>
+                        <p className="text-[13px] leading-snug text-[var(--ink-2)]">{item.productName}</p>
                         {item.guardianName && (
-                          <p className="truncate text-[12.5px] text-[var(--ink-3)]">
+                          <p className="text-[12.5px] leading-snug text-[var(--ink-3)]">
                             {item.guardianName}
                             {item.guardianPhone ? ` · ${formatPhone(item.guardianPhone)}` : ''}
                           </p>
                         )}
                       </div>
                       <div className="flex shrink-0 gap-1">
+                        <Link
+                          href={`/agenda?novo=1&pacienteId=${item.patientId}`}
+                          aria-label="Agendar aplicação"
+                          title="Agendar aplicação"
+                          className="flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-[var(--border-strong)] text-[var(--ink-2)]"
+                        >
+                          <CalendarPlus className="h-4 w-4" />
+                        </Link>
                         {item.guardianPhone && (
                           <a
                             href={`tel:${item.guardianPhone.replace(/\D/g, '')}`}
@@ -137,15 +183,18 @@ function ImmunizationsView() {
                         )}
                       </div>
                     </div>
-                    <div className="mt-2">
-                      <Button asChild size="sm" variant="secondary">
-                        <Link href={`/agenda?novo=1&pacienteId=${item.patientId}`}>Agendar aplicação</Link>
-                      </Button>
-                    </div>
                   </li>
                 );
               })}
             </ul>
+            {dueItems.length > visible && (
+              <div className="border-t border-[var(--border)] p-3">
+                <Button variant="secondary" block onClick={() => setVisible((current) => current + PAGE)}>
+                  Mostrar mais ({dueItems.length - visible})
+                </Button>
+              </div>
+            )}
+            </>
           )}
         </Card>
       ) : (

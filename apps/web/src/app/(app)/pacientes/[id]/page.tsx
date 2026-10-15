@@ -2,18 +2,23 @@
 
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
   CalendarPlus,
   FileText,
+  FlaskConical,
   Pencil,
   Phone,
+  Play,
   ScrollText,
   Stethoscope,
   Weight,
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import type { EncounterDetail, EncounterSummary } from '@chiron/contracts';
+import { PatientSummaryCard } from '@/components/clinical/patient-summary';
 import type { Patient } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate, formatDateTime, formatPhone, formatWeight, whatsappLink } from '@/lib/format';
@@ -39,8 +44,28 @@ import { WeightChart } from '@/components/patients/weight-chart';
 
 export default function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { can } = useSession();
+  const { can, hasModule } = useSession();
   const queryClient = useQueryClient();
+  const router = useRouter();
+
+  // Atendimento já aberto para este paciente: o botão continua esse, em vez
+  // de abrir um segundo por engano.
+  const { data: openEncounters } = useQuery({
+    queryKey: ['encounters', 'open', 'patient', id],
+    queryFn: () => api.get<{ items: EncounterSummary[] }>('/encounters', { patientId: id, open: true, limit: 1 }),
+    enabled: hasModule('clinical') && can('encounter:read'),
+  });
+  const openEncounter = openEncounters?.items[0];
+
+  // Paciente na mesa sem agendamento: um toque abre o atendimento.
+  const startEncounter = useMutation({
+    mutationFn: () => api.post<EncounterDetail>('/encounters', { patientId: id, class: 'outpatient' }),
+    onSuccess: async (encounter) => {
+      await queryClient.invalidateQueries({ queryKey: ['encounters'] });
+      router.push(`/atendimentos/${encounter.id}`);
+    },
+    onError: (caught) => toast.error(errorMessage(caught)),
+  });
 
   const [editOpen, setEditOpen] = useState(false);
   const [weightOpen, setWeightOpen] = useState(false);
@@ -76,6 +101,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
   return (
     <>
       <PageHeader
+        back={{ href: '/pacientes', label: 'Pacientes' }}
         breadcrumb={
           <Link href="/pacientes" className="hover:text-[var(--brand)]">
             Pacientes
@@ -99,6 +125,23 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
           .join(' · ')}
         actions={
           <>
+            {openEncounter ? (
+              <Button asChild size="sm">
+                <Link href={`/atendimentos/${openEncounter.id}`}>
+                  <Play className="h-4 w-4" />
+                  Continuar atendimento
+                </Link>
+              </Button>
+            ) : (
+              hasModule('clinical') &&
+              can('encounter:create') &&
+              patient.status === 'active' && (
+                <Button size="sm" onClick={() => startEncounter.mutate()} loading={startEncounter.isPending}>
+                  <Play className="h-4 w-4" />
+                  Atender agora
+                </Button>
+              )
+            )}
             {can('patient:update') && (
               <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
                 <Pencil className="h-4 w-4" />
@@ -114,7 +157,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               </Button>
             )}
             {can('record:read_sensitive') && (
-              <Button asChild size="sm">
+              <Button asChild size="sm" variant="secondary">
                 <Link href={`/pacientes/${patient.id}/prontuario`}>
                   <ScrollText className="h-4 w-4" />
                   Prontuário
@@ -162,6 +205,12 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {hasModule('clinical') && can('encounter:read') && (
+        <div className="mb-4 md:mb-5">
+          <PatientSummaryCard patientId={patient.id} canEditProblems={can('encounter:update')} />
         </div>
       )}
 
@@ -326,11 +375,13 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
           </Card>
         </div>
 
-        <div className="space-y-4 md:space-y-5">
+        {/* No celular o histórico clínico vem antes de peso e cadastro: é o
+            que o veterinário procura ao abrir a ficha. */}
+        <div className="order-first space-y-4 md:space-y-5 lg:order-none">
           <Card>
             <CardHeader
-              title="Histórico"
-              description="Eventos montados a partir dos registros clínicos."
+              title="Histórico clínico"
+              description="Os eventos mais recentes. O prontuário completo tem tudo."
               action={
                 <Link
                   href={`/pacientes/${patient.id}/prontuario`}
@@ -340,7 +391,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
                 </Link>
               }
             />
-            <PatientTimeline patientId={patient.id} limit={30} />
+            <PatientTimeline patientId={patient.id} limit={10} clinicalOnly />
           </Card>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -348,6 +399,11 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               href={`/pacientes/${patient.id}/prontuario`}
               icon={<Stethoscope className="h-4 w-4" />}
               label="Atendimentos e evolução"
+            />
+            <QuickLink
+              href={`/exames?pacienteId=${patient.id}`}
+              icon={<FlaskConical className="h-4 w-4" />}
+              label="Exames e resultados"
             />
             <QuickLink
               href={`/documentos?pacienteId=${patient.id}`}

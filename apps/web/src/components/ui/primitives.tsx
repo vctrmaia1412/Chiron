@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { Tone } from '@/lib/labels';
 
@@ -86,16 +88,30 @@ export function PageHeader({
   description,
   actions,
   breadcrumb,
+  back,
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: React.ReactNode;
   breadcrumb?: React.ReactNode;
+  /** No celular vira um botão de voltar grande no lugar do caminho miúdo. */
+  back?: { href: string; label: string };
 }) {
   return (
     <header className="mb-4 flex flex-col gap-3 md:mb-6 md:flex-row md:items-end md:justify-between">
       <div className="min-w-0">
-        {breadcrumb && <div className="mb-1 text-[13px] text-[var(--ink-3)]">{breadcrumb}</div>}
+        {back && (
+          <Link
+            href={back.href}
+            className="-ml-2 mb-1 inline-flex h-10 items-center gap-1 rounded-[var(--radius)] px-2 text-[14px] font-medium text-[var(--brand)] active:bg-[var(--surface-2)] md:hidden"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {back.label}
+          </Link>
+        )}
+        {breadcrumb && (
+          <div className={cn('mb-1 text-[13px] text-[var(--ink-3)]', back && 'hidden md:block')}>{breadcrumb}</div>
+        )}
         <h1 className="text-xl font-semibold tracking-tight text-[var(--ink)] md:text-2xl">{title}</h1>
         {description && <p className="mt-1 text-sm text-[var(--ink-3)]">{description}</p>}
       </div>

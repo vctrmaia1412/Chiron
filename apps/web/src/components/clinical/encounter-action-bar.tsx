@@ -79,6 +79,16 @@ export function EncounterActionBar({
               <ScrollText className="h-5 w-5" />
               Prontuário
             </Link>
+            {onMore && (
+              <button
+                type="button"
+                onClick={onMore}
+                className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-[var(--ink-2)]"
+              >
+                <MoreHorizontal className="h-5 w-5" />
+                Mais
+              </button>
+            )}
           </>
         )}
         {primary && (

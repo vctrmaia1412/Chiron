@@ -85,6 +85,7 @@ export default function GuardianPage({ params }: { params: Promise<{ id: string 
   return (
     <>
       <PageHeader
+        back={{ href: '/tutores', label: 'Tutores' }}
         breadcrumb={
           <Link href="/tutores" className="hover:text-[var(--brand)]">
             Tutores

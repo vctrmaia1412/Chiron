@@ -215,6 +215,19 @@ export function NoteEditor({
     if (flushRef) flushRef.current = flushAll;
   }, [flushRef, flushAll]);
 
+  // Sair da tela (voltar, abrir outro paciente, ir à agenda) grava na hora o
+  // que ainda esperava a pausa da digitação, em vez de descartar o timer.
+  const flushOnLeave = useRef(flushAll);
+  useEffect(() => {
+    flushOnLeave.current = flushAll;
+  }, [flushAll]);
+  useEffect(
+    () => () => {
+      void flushOnLeave.current();
+    },
+    [],
+  );
+
   /** Modelo preenche o que está vazio e acrescenta ao que já tem texto, sem apagar nada. */
   const applyTemplate = useCallback(
     (template: NoteTemplate) => {

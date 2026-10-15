@@ -1,7 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useIsDesktop } from '@/lib/use-media-query';
 import { toast } from 'sonner';
 import { CalendarClock, Check, ChevronDown, ClipboardList, Pill, Syringe } from 'lucide-react';
 import type { PatientProblem } from '@chiron/contracts';
@@ -23,11 +25,17 @@ export function PatientSummaryCard({
   canEditProblems,
 }: {
   patientId: string;
-  encounterId: string;
+  /** Atendimento em curso, que fica fora de "última consulta". */
+  encounterId?: string;
   canEditProblems: boolean;
 }) {
   const queryClient = useQueryClient();
   const { data, isLoading } = usePatientSummary(patientId, encounterId);
+  // No celular começa recolhido (a linha de cima já diz o que há em aberto) para
+  // não empurrar o registro para baixo; no computador fica aberto na coluna.
+  const isDesktop = useIsDesktop();
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const expanded = choice ?? isDesktop;
 
   const resolve = useMutation({
     mutationFn: (problem: PatientProblem) =>
@@ -62,7 +70,14 @@ export function PatientSummaryCard({
 
   return (
     <Card>
-      <details className="group" open>
+      <details
+        className="group"
+        open={expanded}
+        onToggle={(event) => {
+          const next = event.currentTarget.open;
+          if (next !== expanded) setChoice(next);
+        }}
+      >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
           <span className="min-w-0">
             <span className="block text-[14px] font-semibold text-[var(--ink)]">Resumo do paciente</span>
