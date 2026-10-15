@@ -198,12 +198,50 @@ export async function openSignedUrl(resolveUrl: () => Promise<string>): Promise<
   window.location.href = url;
 }
 
+/** Nome do campo como aparece na tela, para o aviso dizer onde está o problema. */
+const FIELD_LABEL: Record<string, string> = {
+  name: 'Nome',
+  email: 'E-mail',
+  password: 'Senha',
+  phonePrimary: 'Telefone',
+  phoneSecondary: 'Telefone secundário',
+  document: 'Documento',
+  documentKind: 'Tipo de documento',
+  birthDate: 'Nascimento',
+  speciesId: 'Espécie',
+  breedId: 'Raça',
+  sex: 'Sexo',
+  weightKg: 'Peso',
+  serviceId: 'Serviço',
+  professionalId: 'Profissional',
+  patientId: 'Paciente',
+  guardianId: 'Tutor',
+  startAt: 'Data e hora',
+  occurredAt: 'Data',
+  reason: 'Motivo',
+  notes: 'Observações',
+  dose: 'Dose',
+  route: 'Via',
+  frequency: 'Frequência',
+  duration: 'Duração',
+  councilNumber: 'Número do conselho',
+  councilState: 'UF do conselho',
+  defaultPrice: 'Preço',
+  defaultDurationMin: 'Duração',
+  title: 'Título',
+};
+
 /** Mensagem pronta para exibir, sem vazar detalhe técnico ao usuário. */
 export function errorMessage(error: unknown, fallback = 'Não foi possível concluir a operação.'): string {
   if (error instanceof ApiError) {
     const issues = error.fieldIssues;
     if (issues.length > 0 && error.code === 'VALIDATION_FAILED') {
-      return issues.map((i) => i.message).join(' ');
+      return issues
+        .map((issue) => {
+          const field = FIELD_LABEL[issue.path.split('.').pop() ?? ''];
+          return field ? `${field}: ${issue.message}` : issue.message;
+        })
+        .join(' ');
     }
     return error.message;
   }

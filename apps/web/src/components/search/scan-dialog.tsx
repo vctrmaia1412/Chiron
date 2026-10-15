@@ -139,6 +139,7 @@ function ScanDialogContent({ open, onOpenChange }: { open: boolean; onOpenChange
         <div className="relative">
           <Keyboard className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-3)]" />
           <Input
+            data-sheet-ignore
             ref={inputRef}
             value={code}
             onChange={(event) => setCode(event.target.value)}

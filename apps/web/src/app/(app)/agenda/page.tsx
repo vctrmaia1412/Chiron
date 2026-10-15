@@ -46,6 +46,8 @@ function AgendaView() {
   const [chosenDay, setChosenDay] = useState<Date | null>(() => parseIsoDate(params.get('data')));
   const [professionalId, setProfessionalId] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  // Semana: a recepção enxerga os buracos e os dias cheios antes de marcar.
+  const [view, setView] = useState<'dia' | 'semana'>(() => (params.get('visao') === 'semana' ? 'semana' : 'dia'));
   const [newForm, setNewForm] = useState<NewAppointmentPreset | null>(() =>
     params.get('novo')
       ? {
@@ -77,16 +79,24 @@ function AgendaView() {
     node?.scrollIntoView({ block: 'center' });
   }, []);
 
-  const range = useMemo(() => ({ from: startOfDay(day).toISOString(), to: endOfDay(day).toISOString() }), [day]);
+  const weekStart = useMemo(() => addDays(startOfDay(day), -((day.getDay() + 6) % 7)), [day]);
+  const range = useMemo(
+    () =>
+      view === 'semana'
+        ? { from: weekStart.toISOString(), to: endOfDay(addDays(weekStart, 6)).toISOString() }
+        : { from: startOfDay(day).toISOString(), to: endOfDay(day).toISOString() },
+    [view, day, weekStart],
+  );
+  const step = view === 'semana' ? 7 : 1;
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['appointments', range.from, professionalId],
+    queryKey: ['appointments', range.from, range.to, professionalId],
     queryFn: () =>
       api.get<{ items: Appointment[] }>('/appointments', {
         from: range.from,
         to: range.to,
         professionalId: professionalId || undefined,
-        limit: 200,
+        limit: 500,
       }),
     // Recepção e consultório mexem na mesma agenda: atualiza sozinha.
     refetchInterval: 30_000,
@@ -113,7 +123,11 @@ function AgendaView() {
     <>
       <PageHeader
         title="Agenda"
-        description={capitalize(formatWeekday(day))}
+        description={
+          view === 'semana'
+            ? `Semana de ${formatDate(weekStart)} a ${formatDate(addDays(weekStart, 6))}`
+            : capitalize(formatWeekday(day))
+        }
         actions={
           can('appointment:create') ? (
             <Button size="sm" onClick={() => setNewForm({})}>
@@ -128,8 +142,8 @@ function AgendaView() {
         <div className="flex items-center rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)]">
           <button
             type="button"
-            aria-label="Dia anterior"
-            onClick={() => setDay(addDays(day, -1))}
+            aria-label={view === 'semana' ? 'Semana anterior' : 'Dia anterior'}
+            onClick={() => setDay(addDays(day, -step))}
             className="flex h-10 w-10 items-center justify-center text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -145,8 +159,8 @@ function AgendaView() {
           />
           <button
             type="button"
-            aria-label="Próximo dia"
-            onClick={() => setDay(addDays(day, 1))}
+            aria-label={view === 'semana' ? 'Próxima semana' : 'Próximo dia'}
+            onClick={() => setDay(addDays(day, step))}
             className="flex h-10 w-10 items-center justify-center text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
           >
             <ChevronRight className="h-4 w-4" />
@@ -158,6 +172,26 @@ function AgendaView() {
             Hoje
           </Button>
         )}
+
+        <div
+          role="group"
+          aria-label="Visão da agenda"
+          className="flex rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] p-0.5"
+        >
+          {(['dia', 'semana'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={view === option}
+              onClick={() => setView(option)}
+              className={`h-9 rounded-[calc(var(--radius)-2px)] px-3 text-[13px] font-medium ${
+                view === option ? 'bg-[var(--brand)] text-white' : 'text-[var(--ink-2)]'
+              }`}
+            >
+              {option === 'dia' ? 'Dia' : 'Semana'}
+            </button>
+          ))}
+        </div>
 
         <Select
           value={professionalId}
@@ -193,6 +227,15 @@ function AgendaView() {
             <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />
           ) : isLoading ? (
             <ListSkeleton rows={5} />
+          ) : view === 'semana' ? (
+            <WeekList
+              weekStart={weekStart}
+              items={items}
+              onOpenDay={(date) => {
+                setDay(date);
+                setView('dia');
+              }}
+            />
           ) : items.length === 0 ? (
             <EmptyState
               icon={<CalendarDays className="h-7 w-7" />}
@@ -366,6 +409,78 @@ function AgendaView() {
 
       <CancelAppointmentSheet appointment={cancelTarget} onClose={() => setCancelTarget(null)} />
     </>
+  );
+}
+
+/**
+ * Semana em lista por dia: cabe no celular sem grade espremida. Tocar no dia
+ * (ou num horário) abre a visão do dia, onde ficam check-in e remarcar.
+ */
+function WeekList({
+  weekStart,
+  items,
+  onOpenDay,
+}: {
+  weekStart: Date;
+  items: Appointment[];
+  onOpenDay: (date: Date) => void;
+}) {
+  const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+  return (
+    <ul className="divide-y divide-[var(--border)]">
+      {days.map((date) => {
+        const key = toIsoDate(date);
+        const dayItems = items.filter((appointment) => toIsoDate(new Date(appointment.startAt)) === key);
+        const active = dayItems.filter((appointment) => !['cancelled', 'no_show'].includes(appointment.status));
+        return (
+          <li key={key}>
+            <button
+              type="button"
+              onClick={() => onOpenDay(date)}
+              className={`flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left hover:bg-[var(--surface-2)] ${
+                isToday(date) ? 'bg-[var(--brand-soft)]' : 'bg-[var(--surface-2)]/60'
+              }`}
+            >
+              <span className="text-[13.5px] font-semibold text-[var(--ink)]">
+                {capitalize(formatWeekday(date))}
+              </span>
+              <span className="text-[12.5px] text-[var(--ink-3)]">
+                {active.length === 0 ? 'livre' : `${active.length} ${active.length === 1 ? 'horário' : 'horários'}`}
+              </span>
+            </button>
+            {dayItems.length > 0 && (
+              <ul>
+                {dayItems.map((appointment) => {
+                  const status = statusFor(APPOINTMENT_STATUS, appointment.status);
+                  return (
+                    <li key={appointment.id}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenDay(date)}
+                        className="flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left hover:bg-[var(--surface-2)]"
+                      >
+                        <span className="w-12 shrink-0 text-[13.5px] font-semibold tabular text-[var(--ink)]">
+                          {formatTime(appointment.startAt)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14px] text-[var(--ink)]">
+                            {appointment.patient?.name ?? appointment.guardian?.name ?? 'Sem paciente'}
+                          </span>
+                          <span className="block truncate text-[12px] text-[var(--ink-3)]">
+                            {[appointment.service.name, appointment.professional?.name].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                        <Badge tone={status.tone}>{status.label}</Badge>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

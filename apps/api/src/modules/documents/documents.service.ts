@@ -473,7 +473,9 @@ export class DocumentsService {
             professional: string | null;
           }>(
             `SELECT i.vaccine_name AS name, i.administered_at AS date, i.lot_number AS lot,
-                    i.next_due_at AS next, pr.name AS professional
+                    i.next_due_at AS next,
+                    -- dose de outro local: a carteira mostra quem aplicou e onde, como veio do tutor
+                    COALESCE(pr.name, NULLIF(concat_ws(' · ', i.external_professional, i.external_location), '')) AS professional
                FROM immunization.immunizations i
                LEFT JOIN registry.professionals pr ON pr.id = i.professional_id AND pr.tenant_id = i.tenant_id
               WHERE i.tenant_id = $1 AND i.patient_id = $2 AND i.status = 'completed'
@@ -483,7 +485,7 @@ export class DocumentsService {
           const preventives = await tx.query<{ name: string; date: Date; kind: string; next: Date | null }>(
             `SELECT product_name AS name, administered_at AS date, kind, next_due_at AS next
                FROM immunization.preventive_treatments
-              WHERE tenant_id = $1 AND patient_id = $2
+              WHERE tenant_id = $1 AND patient_id = $2 AND status = 'completed'
               ORDER BY administered_at DESC`,
             [ctx.tenantId, patientId],
           );
@@ -511,19 +513,24 @@ export class DocumentsService {
         }
 
         case 'medical_record': {
+          // Prontuário para levar a outro colega ou ao tutor: o que foi feito em
+          // cada atendimento (notas na versão vigente, diagnósticos, procedimentos,
+          // receitas assinadas, exames, vacinas) e o que vale para o paciente todo.
           const encounters = await tx.query<{
             date: Date;
             service: string | null;
             professional: string | null;
             status: string;
             id: string;
+            weight_kg: string | null;
+            follow_up_due_at: Date | null;
           }>(
             `SELECT COALESCE(e.started_at, e.arrived_at, e.created_at) AS date, sc.name AS service,
-                    pr.name AS professional, e.status, e.id
+                    pr.name AS professional, e.status, e.id, e.weight_kg::text AS weight_kg, e.follow_up_due_at
                FROM clinical.encounters e
                LEFT JOIN registry.service_catalog sc ON sc.id = e.service_id AND sc.tenant_id = e.tenant_id
                LEFT JOIN registry.professionals pr ON pr.id = e.attending_professional_id AND pr.tenant_id = e.tenant_id
-              WHERE e.tenant_id = $1 AND e.patient_id = $2 AND e.status <> 'entered_in_error'
+              WHERE e.tenant_id = $1 AND e.patient_id = $2 AND e.status NOT IN ('entered_in_error', 'cancelled')
               ORDER BY 1 DESC LIMIT 100`,
             [ctx.tenantId, patientId],
           );
@@ -531,15 +538,113 @@ export class DocumentsService {
           const sections = await tx.query<{ encounter_id: string; kind: string; body: string }>(
             `SELECT encounter_id, kind, body FROM clinical.encounter_notes
               WHERE tenant_id = $1 AND patient_id = $2 AND status IN ('final','amended') AND body <> ''
+                AND superseded_by_note_id IS NULL
               ORDER BY sequence`,
             [ctx.tenantId, patientId],
           );
 
-          const diagnoses = await tx.query<{ encounter_id: string; description: string }>(
-            `SELECT encounter_id, description FROM clinical.encounter_diagnoses
-              WHERE tenant_id = $1 AND patient_id = $2`,
+          const diagnoses = await tx.query<{ encounter_id: string; description: string; kind: string }>(
+            `SELECT encounter_id, description, kind FROM clinical.encounter_diagnoses
+              WHERE tenant_id = $1 AND patient_id = $2 AND kind <> 'ruled_out'
+              ORDER BY rank`,
             [ctx.tenantId, patientId],
           );
+
+          const procedures = await tx.query<{ encounter_id: string; description: string; notes: string | null }>(
+            `SELECT encounter_id, description, notes FROM clinical.encounter_procedures
+              WHERE tenant_id = $1 AND patient_id = $2 ORDER BY performed_at`,
+            [ctx.tenantId, patientId],
+          );
+
+          const prescriptionItems = await tx.query<{
+            encounter_id: string | null;
+            drug_name: string;
+            dose_value: string | null;
+            dose_uom: string | null;
+            route: string | null;
+            frequency_value: string | null;
+            duration_days: number | null;
+            instructions: string | null;
+          }>(
+            `SELECT p.encounter_id, i.drug_name, i.dose_value::text AS dose_value, i.dose_uom, i.route,
+                    i.frequency_value::text AS frequency_value, i.duration_days, i.instructions
+               FROM clinical.prescriptions p
+               JOIN clinical.prescription_items i ON i.prescription_id = p.id AND i.tenant_id = p.tenant_id
+              WHERE p.tenant_id = $1 AND p.patient_id = $2 AND p.status = 'signed'
+              ORDER BY p.signed_at, i.seq`,
+            [ctx.tenantId, patientId],
+          );
+
+          const exams = await tx.query<{
+            encounter_id: string | null;
+            name: string;
+            status: string;
+            interpretation: string | null;
+          }>(
+            `SELECT o.encounter_id, c.name, i.status, r.interpretation
+               FROM lab.exam_orders o
+               JOIN lab.exam_order_items i ON i.exam_order_id = o.id AND i.tenant_id = o.tenant_id
+               JOIN lab.exam_catalog c ON c.id = i.exam_catalog_id
+               LEFT JOIN lab.exam_results r ON r.exam_order_item_id = i.id AND r.tenant_id = i.tenant_id
+                    AND r.superseded_by_result_id IS NULL AND r.status <> 'entered_in_error'
+              WHERE o.tenant_id = $1 AND o.patient_id = $2 AND i.status <> 'cancelled'
+              ORDER BY o.ordered_at`,
+            [ctx.tenantId, patientId],
+          );
+
+          const vaccines = await tx.query<{ name: string; administered_at: Date; lot_number: string | null }>(
+            `SELECT vaccine_name AS name, administered_at, lot_number FROM immunization.immunizations
+              WHERE tenant_id = $1 AND patient_id = $2 AND status = 'completed'
+             UNION ALL
+             SELECT product_name AS name, administered_at, lot_number FROM immunization.preventive_treatments
+              WHERE tenant_id = $1 AND patient_id = $2
+             ORDER BY administered_at DESC LIMIT 60`,
+            [ctx.tenantId, patientId],
+          );
+
+          const allergies = await tx.query<{ substance: string; reaction: string | null; severity: string }>(
+            `SELECT substance, reaction, severity FROM registry.patient_allergies
+              WHERE tenant_id = $1 AND patient_id = $2 AND status = 'active' ORDER BY noted_at`,
+            [ctx.tenantId, patientId],
+          );
+
+          const statusLabel: Record<string, string> = {
+            finished: 'Finalizado',
+            in_progress: 'Em andamento',
+            on_hold: 'Pausado',
+            arrived: 'Aguardando',
+            triaged: 'Triado',
+          };
+          const diagnosisKind: Record<string, string> = {
+            final: 'definitivo',
+            presumptive: 'presuntivo',
+            differential: 'diferencial',
+          };
+          const severityLabel: Record<string, string> = {
+            mild: 'leve',
+            moderate: 'moderada',
+            severe: 'grave',
+            unknown: 'gravidade não informada',
+          };
+          const examStatus: Record<string, string> = {
+            requested: 'solicitado',
+            collected: 'coletado',
+            sent: 'enviado',
+            in_progress: 'em análise',
+            resulted: 'resultado liberado',
+            reviewed: 'revisado',
+          };
+          const describeItem = (item: (typeof prescriptionItems.rows)[number]) =>
+            [
+              item.drug_name,
+              item.dose_value ? `${Number(item.dose_value).toLocaleString('pt-BR')} ${item.dose_uom ?? ''}`.trim() : null,
+              item.route,
+              item.frequency_value ? `a cada ${Number(item.frequency_value).toLocaleString('pt-BR')} h` : null,
+              item.duration_days ? `por ${item.duration_days} dias` : null,
+              item.instructions,
+            ]
+              .filter(Boolean)
+              .join(' · ');
 
           const noteTitles: Record<string, string> = {
             triage: 'Triagem',
@@ -566,15 +671,33 @@ export class DocumentsService {
               guardianName: p.guardian_name,
               birthDate: p.birth_date ? p.birth_date.toLocaleDateString('pt-BR') : null,
             },
+            allergies: allergies.rows.map(
+              (a) => `${a.substance}${a.reaction ? ` (${a.reaction})` : ''}, ${severityLabel[a.severity] ?? a.severity}`,
+            ),
+            vaccines: vaccines.rows.map(
+              (v) =>
+                `${v.administered_at.toLocaleDateString('pt-BR')} · ${v.name}${v.lot_number ? ` · lote ${v.lot_number}` : ''}`,
+            ),
             encounters: encounters.rows.map((e) => ({
               date: e.date.toLocaleDateString('pt-BR'),
               service: e.service,
               professional: e.professional,
-              status: e.status === 'finished' ? 'Finalizado' : e.status,
+              status: statusLabel[e.status] ?? e.status,
+              weight: e.weight_kg ? `${Number(e.weight_kg).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg` : null,
+              followUp: e.follow_up_due_at ? e.follow_up_due_at.toLocaleDateString('pt-BR') : null,
               sections: sections.rows
                 .filter((s) => s.encounter_id === e.id)
                 .map((s) => ({ title: noteTitles[s.kind] ?? s.kind, body: s.body })),
-              diagnoses: diagnoses.rows.filter((d) => d.encounter_id === e.id).map((d) => d.description),
+              diagnoses: diagnoses.rows
+                .filter((d) => d.encounter_id === e.id)
+                .map((d) => (diagnosisKind[d.kind] ? `${d.description} (${diagnosisKind[d.kind]})` : d.description)),
+              procedures: procedures.rows
+                .filter((x) => x.encounter_id === e.id)
+                .map((x) => (x.notes ? `${x.description}: ${x.notes}` : x.description)),
+              prescriptions: prescriptionItems.rows.filter((x) => x.encounter_id === e.id).map(describeItem),
+              exams: exams.rows
+                .filter((x) => x.encounter_id === e.id)
+                .map((x) => `${x.name}: ${x.interpretation ?? examStatus[x.status] ?? x.status}`),
             })),
           });
           title = `Prontuário - ${p.name}`;

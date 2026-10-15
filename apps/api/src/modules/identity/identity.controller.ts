@@ -71,6 +71,13 @@ export class IdentityController {
     return { ok: true };
   }
 
+  /** Prévia pública do convite, para a tela de aceite. Mesma cota das rotas de autenticação. */
+  @Get('auth/invitations/:token')
+  @Public()
+  async previewInvitation(@Param('token') token: string) {
+    return this.identity.previewInvitation(token);
+  }
+
   @Post('auth/invitations/accept')
   @Public()
   async acceptInvitation(

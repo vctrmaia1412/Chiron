@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError } from '@/lib/api';
-import { useSession } from '@/lib/session';
+import { loginUrl, useSession } from '@/lib/session';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { MobileNav } from '@/components/layout/mobile-nav';
@@ -80,7 +80,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && error instanceof ApiError && error.isAuthError) {
-      router.replace('/entrar');
+      router.replace(loginUrl());
     }
   }, [loading, error, router]);
 

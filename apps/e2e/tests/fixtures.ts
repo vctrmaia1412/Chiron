@@ -1,4 +1,4 @@
-import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test as base, expect, type APIRequestContext, type Page, type PlaywrightWorkerArgs } from '@playwright/test';
 import { API_URL, storageFor, type Role } from './env';
 
 /**
@@ -10,6 +10,8 @@ import { API_URL, storageFor, type Role } from './env';
 type Fixtures = {
   role: Role;
   api: Api;
+  /** Cliente de API de outro papel, para preparar o cenário (ex.: o veterinário pede o retorno). */
+  apiAs: (role: Role) => Promise<Api>;
   pageErrors: string[];
 };
 
@@ -19,6 +21,35 @@ export interface Api {
   professionalId: string | null;
   get<T = unknown>(path: string): Promise<T>;
   post<T = unknown>(path: string, data?: unknown): Promise<T>;
+  patch<T = unknown>(path: string, data?: unknown): Promise<T>;
+}
+
+async function createApi(playwright: PlaywrightWorkerArgs['playwright'], role: Role, origin: string): Promise<Api> {
+  const request = await playwright.request.newContext({
+    storageState: storageFor(role),
+    extraHTTPHeaders: { Origin: origin },
+  });
+  const me = await (await request.get(`${API_URL}/me/context`)).json();
+  const tenantId: string = me.tenant.id;
+  const headers = { 'X-Chiron-Tenant': tenantId };
+  async function parse<T>(method: string, path: string, response: Awaited<ReturnType<APIRequestContext['get']>>) {
+    if (!response.ok()) throw new Error(`${method} ${path}: ${response.status()} ${await response.text()}`);
+    return (await response.json()) as T;
+  }
+  return {
+    request,
+    tenantId,
+    professionalId: me.membership?.professionalId ?? null,
+    async get<T>(path: string) {
+      return parse<T>('GET', path, await request.get(`${API_URL}${path}`));
+    },
+    async post<T>(path: string, data?: unknown) {
+      return parse<T>('POST', path, await request.post(`${API_URL}${path}`, { data: data ?? {}, headers }));
+    },
+    async patch<T>(path: string, data?: unknown) {
+      return parse<T>('PATCH', path, await request.patch(`${API_URL}${path}`, { data: data ?? {}, headers }));
+    },
+  };
 }
 
 export const test = base.extend<Fixtures>({
@@ -45,32 +76,19 @@ export const test = base.extend<Fixtures>({
   ],
 
   api: async ({ playwright, role, baseURL }, use) => {
-    const request = await playwright.request.newContext({
-      storageState: storageFor(role),
-      extraHTTPHeaders: { Origin: baseURL ?? 'http://localhost:3000' },
-    });
-    const me = await (await request.get(`${API_URL}/me/context`)).json();
-    const tenantId: string = me.tenant.id;
-    const api: Api = {
-      request,
-      tenantId,
-      professionalId: me.membership?.professionalId ?? null,
-      async get<T>(path: string) {
-        const response = await request.get(`${API_URL}${path}`);
-        if (!response.ok()) throw new Error(`GET ${path}: ${response.status()} ${await response.text()}`);
-        return (await response.json()) as T;
-      },
-      async post<T>(path: string, data?: unknown) {
-        const response = await request.post(`${API_URL}${path}`, {
-          data: data ?? {},
-          headers: { 'X-Chiron-Tenant': tenantId },
-        });
-        if (!response.ok()) throw new Error(`POST ${path}: ${response.status()} ${await response.text()}`);
-        return (await response.json()) as T;
-      },
-    };
+    const api = await createApi(playwright, role, baseURL ?? 'http://localhost:3000');
     await use(api);
-    await request.dispose();
+    await api.request.dispose();
+  },
+
+  apiAs: async ({ playwright, baseURL }, use) => {
+    const created: Api[] = [];
+    await use(async (role) => {
+      const api = await createApi(playwright, role, baseURL ?? 'http://localhost:3000');
+      created.push(api);
+      return api;
+    });
+    await Promise.all(created.map((api) => api.request.dispose()));
   },
 });
 

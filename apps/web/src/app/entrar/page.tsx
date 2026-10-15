@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import type { LoginResponse, TenantSummary } from '@chiron/contracts';
 import { ApiError, api, errorMessage, setActiveTenantId } from '@/lib/api';
+import { safeReturnPath } from '@/lib/session';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 import { Logo } from '@/components/brand/logo';
@@ -45,7 +46,7 @@ function LoginForm() {
 
       setActiveTenantId(response.activeTenantId);
       queryClient.clear();
-      router.replace('/');
+      router.replace(safeReturnPath(params.get('voltar')));
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'ACCOUNT_LOCKED') {
         setError('Conta bloqueada temporariamente por tentativas de acesso. Tente novamente em alguns minutos.');
@@ -63,7 +64,7 @@ function LoginForm() {
       await api.post('/me/context', { tenantId });
       setActiveTenantId(tenantId);
       queryClient.clear();
-      router.replace('/');
+      router.replace(safeReturnPath(params.get('voltar')));
     } catch (caught) {
       setError(errorMessage(caught));
       setSubmitting(false);

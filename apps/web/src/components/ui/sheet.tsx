@@ -1,8 +1,17 @@
 'use client';
 
+import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
+
+/** Digitar em busca ou filtro não conta como trabalho a perder. */
+function countsAsEditing(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.closest('[data-sheet-ignore]')) return false;
+  if (target instanceof HTMLInputElement && target.type === 'search') return false;
+  return target.getAttribute('role') !== 'combobox';
+}
 
 /**
  * Uma superfície modal só. No celular ela sobe do rodapé como bottom sheet,
@@ -38,7 +47,56 @@ export function Sheet({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-[rgba(16,32,31,0.42)] backdrop-blur-[2px]" />
+        <SheetContent
+          onOpenChange={onOpenChange}
+          title={title}
+          description={description}
+          footer={footer}
+          width={width}
+        >
+          {children}
+        </SheetContent>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+/**
+ * O conteúdo monta a cada abertura, então o "foi digitado algo" recomeça
+ * sozinho. Fechar sem querer (arrastar, tocar fora, Esc, X) com texto
+ * digitado pergunta antes; "Cancelar" e salvar fecham direto.
+ */
+function SheetContent({
+  onOpenChange,
+  title,
+  description,
+  children,
+  footer,
+  width,
+}: {
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  width: string;
+}) {
+  const [dirty, setDirty] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  function guard(event: Event) {
+    if (!dirty) return;
+    event.preventDefault();
+    setConfirming(true);
+  }
+
+  return (
         <Dialog.Content
+          onInput={(event) => {
+            if (!dirty && countsAsEditing(event.target)) setDirty(true);
+          }}
+          onEscapeKeyDown={guard}
+          onInteractOutside={guard}
           className={cn(
             'fixed z-50 flex flex-col bg-[var(--surface)] shadow-[var(--shadow-lg)] focus:outline-none',
             // celular: folha inferior
@@ -58,26 +116,52 @@ export function Sheet({
                 </Dialog.Description>
               )}
             </div>
-            <Dialog.Close
+            <button
+              type="button"
+              onClick={() => (dirty ? setConfirming(true) : onOpenChange(false))}
               className="-mr-1 rounded-[var(--radius)] p-2 text-[var(--ink-3)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
               aria-label="Fechar"
             >
               <X className="h-5 w-5" />
-            </Dialog.Close>
+            </button>
           </div>
 
           <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
             {children}
           </div>
 
-          {footer && (
-            <div className="safe-bottom flex flex-col-reverse gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:flex-row sm:justify-end sm:px-5">
-              {footer}
+          {confirming ? (
+            <div
+              role="alert"
+              className="safe-bottom flex flex-col gap-2 border-t border-[var(--warning)]/30 bg-[var(--warning-soft)] px-4 py-3 sm:flex-row sm:items-center sm:px-5"
+            >
+              <p className="flex-1 text-[14px] font-medium text-[var(--ink)]">Descartar o que foi digitado?</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setConfirming(false)}
+                  className="h-11 flex-1 rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm font-medium text-[var(--ink-2)] sm:h-10 sm:flex-none"
+                >
+                  Continuar editando
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenChange(false)}
+                  className="h-11 flex-1 rounded-[var(--radius)] bg-[var(--danger)] px-4 text-sm font-medium text-white sm:h-10 sm:flex-none"
+                >
+                  Descartar
+                </button>
+              </div>
             </div>
+          ) : (
+            footer && (
+              <div className="safe-bottom flex flex-col-reverse gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:flex-row sm:justify-end sm:px-5">
+                {footer}
+              </div>
+            )
           )}
         </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
   );
 }
 

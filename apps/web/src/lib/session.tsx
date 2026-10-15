@@ -28,6 +28,27 @@ interface SessionValue {
 
 const SessionContext = createContext<SessionValue | null>(null);
 
+/**
+ * Endereço de login que traz a pessoa de volta para onde estava: sessão que
+ * expira no meio do atendimento não pode largar o veterinário no painel.
+ */
+export function loginUrl(options: { expired?: boolean } = {}): string {
+  const params = new URLSearchParams();
+  if (options.expired) params.set('expirada', '1');
+  if (typeof window !== 'undefined') {
+    const here = `${window.location.pathname}${window.location.search}`;
+    if (here !== '/' && !here.startsWith('/entrar')) params.set('voltar', here);
+  }
+  const query = params.toString();
+  return query ? `/entrar?${query}` : '/entrar';
+}
+
+/** Só caminhos internos: `voltar=//site.com` ou `https://...` cairiam fora do sistema. */
+export function safeReturnPath(value: string | null): string {
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return '/';
+  return value;
+}
+
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -54,7 +75,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setUnauthenticatedHandler(() => {
       queryClient.clear();
-      router.replace('/entrar?expirada=1');
+      router.replace(loginUrl({ expired: true }));
     });
     return () => setUnauthenticatedHandler(null);
   }, [queryClient, router]);

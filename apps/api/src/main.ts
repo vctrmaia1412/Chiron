@@ -124,6 +124,10 @@ async function registerRateLimit(app: NestFastifyApplication, cfg: Env): Promise
       (route) => `${prefix}/${route}`,
     ),
   );
+  // A prévia do convite (`GET auth/invitations/:token`) consulta token cru: na
+  // cota larga do tráfego anônimo ela viraria um jeito barato de varrer tokens.
+  const invitationPrefix = `${prefix}/auth/invitations/`;
+  const isAuthPath = (path: string): boolean => authPaths.has(path) || path.startsWith(invitationPrefix);
   const probePaths = new Set([`${prefix}/health`, `${prefix}/ready`]);
 
   // Três classes de cota, cada uma com contador próprio por IP: login (argon2id),
@@ -132,7 +136,7 @@ async function registerRateLimit(app: NestFastifyApplication, cfg: Env): Promise
   // e a sessão inválida é recusada pelo guard logo em seguida.
   const sessionCookie = new RegExp(`(?:^|;\\s*)${cfg.COOKIE_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=`);
   const rateClass = (request: FastifyRequest): 'auth' | 'session' | 'public' => {
-    if (authPaths.has(routePath(request))) return 'auth';
+    if (isAuthPath(routePath(request))) return 'auth';
     return sessionCookie.test(request.headers.cookie ?? '') ? 'session' : 'public';
   };
   const rateMax = {

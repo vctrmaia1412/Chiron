@@ -61,7 +61,9 @@ export async function syncReferenceData(connectionString?: string): Promise<void
                is_system = EXCLUDED.is_system, requires_license = EXCLUDED.requires_license,
                sort = EXCLUDED.sort
          RETURNING id`,
-        [template.key, template.name, template.description, template.clinical, template.sort],
+        // `requiresLicense`, e não `clinical`: o técnico é clínico mas não
+        // assina, e herdar a marca dele fazia o convite de técnico pedir CRMV.
+        [template.key, template.name, template.description, template.requiresLicense, template.sort],
       );
       const roleId = rows[0]?.id;
       if (!roleId) continue;
