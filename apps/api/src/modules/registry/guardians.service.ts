@@ -60,6 +60,11 @@ export class GuardiansService {
   }
 
   async list(ctx: RequestContext, params: { q?: string; limit: number; cursor?: string }) {
+    // Recepção digita o CPF ou o telefone do jeito que o tutor fala: o CPF
+    // casa pelo índice cego (o documento é cifrado) e o telefone sem máscara.
+    const digits = params.q?.replace(/\D/g, '') ?? '';
+    const documentHash = digits.length === 11 || digits.length === 14 ? this.crypto.blindIndex(digits) : null;
+    const phoneDigits = digits.length >= 4 ? digits : null;
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       const { rows } = await tx.query<GuardianRow>(
         `SELECT g.*, (SELECT count(*) FROM registry.patient_guardians pg
@@ -67,11 +72,13 @@ export class GuardiansService {
            FROM registry.guardians g
           WHERE g.tenant_id = $1 AND g.deleted_at IS NULL
             AND ($2::text IS NULL OR g.name ILIKE '%' || $2 || '%' OR g.phone_primary ILIKE '%' || $2 || '%'
-                 OR g.email::text ILIKE '%' || $2 || '%')
+                 OR g.email::text ILIKE '%' || $2 || '%'
+                 OR ($5::text IS NOT NULL AND regexp_replace(coalesce(g.phone_primary, ''), '\\D', '', 'g') LIKE '%' || $5 || '%')
+                 OR ($6::text IS NOT NULL AND g.document_hash = $6))
             AND ($3::timestamptz IS NULL OR g.created_at < $3)
           ORDER BY g.created_at DESC
           LIMIT $4`,
-        [ctx.tenantId, params.q ?? null, params.cursor ?? null, params.limit + 1],
+        [ctx.tenantId, params.q ?? null, params.cursor ?? null, params.limit + 1, phoneDigits, documentHash],
       );
 
       const hasMore = rows.length > params.limit;

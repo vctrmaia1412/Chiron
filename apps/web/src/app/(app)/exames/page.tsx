@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { FlaskConical, Search } from 'lucide-react';
-import type { ExamOrder } from '@chiron/contracts';
+import type { ExamOrder, Patient } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { useDebounced } from '@/lib/use-debounced';
 import { Card, EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/ui/primitives';
@@ -50,12 +50,23 @@ function ExamsList() {
     placeholderData: (previous) => previous,
   });
 
+  // Vindo da ficha: a lista é de um paciente só, e o caminho de volta é a ficha.
+  const { data: patient } = useQuery({
+    queryKey: ['patient', patientId],
+    queryFn: () => api.get<Patient>(`/patients/${patientId}`),
+    enabled: Boolean(patientId),
+  });
+
   const items = data?.items ?? [];
   const mayHaveMore = items.length >= limit;
 
   return (
     <>
-      <PageHeader title="Exames" description="Pedidos, coletas e resultados. Toque num pedido para ver o resultado." />
+      <PageHeader
+        title={patient ? `Exames de ${patient.name}` : 'Exames'}
+        description="Pedidos, coletas e resultados. Toque num pedido para ver o resultado."
+        back={patientId ? { href: `/pacientes/${patientId}`, label: patient?.name ?? 'Ficha do paciente' } : undefined}
+      />
 
       {!patientId && (
         <div className="relative mb-3">

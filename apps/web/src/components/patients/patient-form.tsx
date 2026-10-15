@@ -25,12 +25,15 @@ function PatientFormSheetContent({
   patient,
   onSaved,
   presetGuardian,
+  defaultName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   patient?: Patient | null;
   onSaved?: (patient: Patient) => void;
   presetGuardian?: Guardian | null;
+  /** O que a recepção já digitou na busca vira o nome, sem redigitar. */
+  defaultName?: string;
 }) {
   const queryClient = useQueryClient();
   const editing = Boolean(patient);
@@ -38,7 +41,7 @@ function PatientFormSheetContent({
 
   // O componente só existe enquanto a folha está aberta, então o estado nasce
   // do paciente em edição (ou vazio, no cadastro) sem precisar de efeito.
-  const [name, setName] = useState(patient?.name ?? '');
+  const [name, setName] = useState(patient?.name ?? defaultName ?? '');
   const [speciesId, setSpeciesId] = useState(patient?.species.id ?? '');
   const [breedId, setBreedId] = useState(patient?.breed?.id ?? '');
   const [breedFreeText, setBreedFreeText] = useState(patient?.breedFreeText ?? '');

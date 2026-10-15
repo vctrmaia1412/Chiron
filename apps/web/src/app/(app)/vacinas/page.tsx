@@ -24,7 +24,7 @@ function plain(value: string) {
 
 function ImmunizationsView() {
   const params = useSearchParams();
-  const [tab, setTab] = useState<'pendentes' | 'aplicadas'>(params.get('pendentes') ? 'pendentes' : 'pendentes');
+  const [tab, setTab] = useState<'pendentes' | 'aplicadas'>(params.get('aplicadas') ? 'aplicadas' : 'pendentes');
   const [horizon, setHorizon] = useState(30);
   const [search, setSearch] = useState('');
   const [visible, setVisible] = useState(PAGE);
@@ -200,7 +200,9 @@ function ImmunizationsView() {
       ) : (
         <Card>
           <CardHeader title="Aplicações registradas" />
-          {applied.isLoading ? (
+          {applied.error ? (
+            <ErrorState message={errorMessage(applied.error)} onRetry={() => void applied.refetch()} />
+          ) : applied.isLoading ? (
             <ListSkeleton rows={5} />
           ) : (applied.data?.immunizations ?? []).length === 0 &&
             (applied.data?.preventives ?? []).length === 0 ? (

@@ -75,16 +75,24 @@ function GenerateDocumentSheetContent({
   onOpenChange,
   presetPatientId,
   encounterId,
+  presetTemplate,
+  presetFields,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   presetPatientId?: string;
   encounterId?: string;
+  /** Modelo já escolhido (ex.: atestado de óbito logo depois do registro). */
+  presetTemplate?: string;
+  /** Campos que o sistema já sabe, para ninguém digitar de novo. */
+  presetFields?: Record<string, string>;
 }) {
   const queryClient = useQueryClient();
-  const [templateKey, setTemplateKey] = useState(TEMPLATES[0]!.key);
+  const [templateKey, setTemplateKey] = useState(
+    () => TEMPLATES.find((item) => item.key === presetTemplate)?.key ?? TEMPLATES[0]!.key,
+  );
   const [patient, setPatient] = useState<PatientPickerValue | null>(null);
-  const [fields, setFields] = useState<Record<string, string>>({});
+  const [fields, setFields] = useState<Record<string, string>>(() => presetFields ?? {});
 
   const template = TEMPLATES.find((item) => item.key === templateKey)!;
 

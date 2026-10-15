@@ -83,7 +83,7 @@ function WalkInSheetContent({
       }
     >
       <div className="space-y-4">
-        <PatientPicker value={patient} onChange={setPatient} error={errors.patient} />
+        <PatientPicker value={patient} onChange={setPatient} error={errors.patient} allowCreate />
 
         <Field label="Tipo de atendimento">
           <Select

@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  FileText,
   FlaskConical,
   History,
   PawPrint,
@@ -46,6 +47,8 @@ import { EncounterImmunizations } from '@/components/clinical/encounter-immuniza
 import { PatientSummaryCard } from '@/components/clinical/patient-summary';
 import { EncounterActionBar, type BarAction } from '@/components/clinical/encounter-action-bar';
 import { PatientHistorySheet } from '@/components/clinical/patient-history-sheet';
+import { GenerateDocumentSheet } from '@/components/documents/generate-sheet';
+import { DeathSheet } from '@/components/patients/death-sheet';
 import { rememberEncounter } from '@/components/clinical/active-encounter-pill';
 import { NAV_ITEMS } from '@/components/layout/navigation';
 
@@ -76,6 +79,8 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
   const [vaccineOpen, setVaccineOpen] = useState(false);
   const [examOpen, setExamOpen] = useState(false);
   const [amendTarget, setAmendTarget] = useState<string | null>(null);
+  const [documentOpen, setDocumentOpen] = useState(false);
+  const [deathOpen, setDeathOpen] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const flushNotes = useRef<(() => Promise<boolean>) | null>(null);
   const autoStarted = useRef(false);
@@ -338,12 +343,20 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
               <History className="h-4 w-4" />
               Histórico
             </Button>
-            <Button asChild variant="ghost" size="sm">
-              <Link href={`/pacientes/${encounter.patient.id}/prontuario`}>
-                <ScrollText className="h-4 w-4" />
-                Prontuário
-              </Link>
-            </Button>
+            {can('document:generate') && hasModule('documents') && (
+              <Button variant="ghost" size="sm" onClick={() => setDocumentOpen(true)}>
+                <FileText className="h-4 w-4" />
+                Documento
+              </Button>
+            )}
+            {can('record:read_sensitive') && (
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/pacientes/${encounter.patient.id}/prontuario`}>
+                  <ScrollText className="h-4 w-4" />
+                  Prontuário
+                </Link>
+              </Button>
+            )}
           </>
         }
       />
@@ -643,6 +656,31 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
             </MenuSection>
           )}
 
+          {((can('document:generate') && hasModule('documents')) || (can('death:record') && patient?.status === 'active')) && (
+            <MenuSection title="Documentos">
+              {can('document:generate') && hasModule('documents') && (
+                <MenuButton
+                  icon={FileText}
+                  label="Atestado, termo ou declaração"
+                  onClick={() => {
+                    setSheet(null);
+                    setDocumentOpen(true);
+                  }}
+                />
+              )}
+              {can('death:record') && patient?.status === 'active' && (
+                <MenuButton
+                  icon={X}
+                  label="Registrar óbito"
+                  onClick={() => {
+                    setSheet(null);
+                    setDeathOpen(true);
+                  }}
+                />
+              )}
+            </MenuSection>
+          )}
+
           <MenuSection title="Consultar">
             <MenuButton
               icon={History}
@@ -653,7 +691,9 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
               }}
             />
             <MenuLink icon={PawPrint} label={`Ficha de ${encounter.patient.name}`} href={`/pacientes/${encounter.patient.id}`} />
-            <MenuLink icon={ScrollText} label="Prontuário completo" href={`/pacientes/${encounter.patient.id}/prontuario`} />
+            {can('record:read_sensitive') && (
+              <MenuLink icon={ScrollText} label="Prontuário completo" href={`/pacientes/${encounter.patient.id}/prontuario`} />
+            )}
           </MenuSection>
 
           <MenuSection title="Ir para">
@@ -667,6 +707,17 @@ export default function EncounterPage({ params }: { params: Promise<{ id: string
           </p>
         </div>
       </Sheet>
+
+      <GenerateDocumentSheet open={documentOpen} onOpenChange={setDocumentOpen} encounterId={encounter.id} />
+      {patient && (
+        <DeathSheet
+          open={deathOpen}
+          onOpenChange={setDeathOpen}
+          patient={patient}
+          encounterId={encounter.id}
+          onRecorded={() => void queryClient.invalidateQueries({ queryKey: ['encounter', id] })}
+        />
+      )}
 
       <PatientHistorySheet
         open={historyOpen}

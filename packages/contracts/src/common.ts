@@ -74,6 +74,56 @@ export const documentNumberSchema = z
   .transform((v) => v.replace(/\D/g, ''))
   .refine((v) => v.length === 11 || v.length === 14, 'CPF deve ter 11 dígitos e CNPJ 14');
 
+function checkDigit(digits: number[], weights: number[]): number {
+  const sum = digits.reduce((total, digit, index) => total + digit * weights[index]!, 0);
+  const rest = sum % 11;
+  return rest < 2 ? 0 : 11 - rest;
+}
+
+/** CPF com dígitos verificadores corretos (aceita com ou sem máscara). */
+export function isValidCpf(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length !== 11 || /^(\d)\1{10}$/.test(digits)) return false;
+  const numbers = [...digits].map(Number);
+  const first = checkDigit(numbers.slice(0, 9), [10, 9, 8, 7, 6, 5, 4, 3, 2]);
+  const second = checkDigit(numbers.slice(0, 10), [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]);
+  return first === numbers[9] && second === numbers[10];
+}
+
+/** CNPJ com dígitos verificadores corretos (aceita com ou sem máscara). */
+export function isValidCnpj(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length !== 14 || /^(\d)\1{13}$/.test(digits)) return false;
+  const numbers = [...digits].map(Number);
+  const first = checkDigit(numbers.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  const second = checkDigit(numbers.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  return first === numbers[12] && second === numbers[13];
+}
+
+export type IdentityDocumentKind = 'cpf' | 'cnpj' | 'passport' | 'none';
+
+/**
+ * Normaliza o documento conforme o tipo: CPF e CNPJ ficam só com dígitos,
+ * passaporte mantém letras (em maiúsculas). Devolve a mensagem de erro em
+ * português quando não confere, ou o valor normalizado.
+ */
+export function normalizeDocument(kind: IdentityDocumentKind, value: string): { value: string } | { error: string } {
+  const raw = value.trim();
+  if (kind === 'cpf') {
+    return isValidCpf(raw) ? { value: raw.replace(/\D/g, '') } : { error: 'CPF inválido. Confira os 11 dígitos.' };
+  }
+  if (kind === 'cnpj') {
+    return isValidCnpj(raw) ? { value: raw.replace(/\D/g, '') } : { error: 'CNPJ inválido. Confira os 14 dígitos.' };
+  }
+  if (kind === 'passport') {
+    const compact = raw.replace(/[\s.-]/g, '').toUpperCase();
+    return /^[A-Z0-9]{5,20}$/.test(compact)
+      ? { value: compact }
+      : { error: 'Passaporte deve ter de 5 a 20 letras ou números.' };
+  }
+  return { error: 'Escolha o tipo de documento antes de informar o número.' };
+}
+
 export const addressSchema = z.object({
   zipCode: z.string().trim().max(12).optional(),
   street: z.string().trim().max(200).optional(),

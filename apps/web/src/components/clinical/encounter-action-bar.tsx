@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle2, MoreHorizontal, Play, ScrollText, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { useSession } from '@/lib/session';
 
 export interface BarAction {
   key: string;
@@ -28,6 +29,7 @@ export function EncounterActionBar({
   primary?: { label: string; kind: 'start' | 'finish' | 'assume'; onClick: () => void; loading?: boolean };
   patientId: string;
 }) {
+  const { can } = useSession();
   const writable = actions.length > 0;
 
   return (
@@ -72,13 +74,15 @@ export function EncounterActionBar({
               <ArrowLeft className="h-5 w-5" />
               Atendimentos
             </Link>
-            <Link
-              href={`/pacientes/${patientId}/prontuario`}
-              className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-[var(--ink-2)]"
-            >
-              <ScrollText className="h-5 w-5" />
-              Prontuário
-            </Link>
+            {can('record:read_sensitive') && (
+              <Link
+                href={`/pacientes/${patientId}/prontuario`}
+                className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-[var(--ink-2)]"
+              >
+                <ScrollText className="h-5 w-5" />
+                Prontuário
+              </Link>
+            )}
             {onMore && (
               <button
                 type="button"

@@ -170,7 +170,7 @@ function AppointmentFormSheetContent({
             </p>
           </div>
         ) : (
-          <PatientPicker value={patient} onChange={setChosenPatient} error={errors.patient} />
+          <PatientPicker value={patient} onChange={setChosenPatient} error={errors.patient} allowCreate />
         )}
 
         <Field label="Serviço" required error={errors.serviceId}>

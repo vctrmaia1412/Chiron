@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import {
   addressSchema,
-  documentNumberSchema,
+  type IdentityDocumentKind,
   emailSchema,
   isoDateSchema,
   isoDateTimeSchema,
   moneySchema,
   nameSchema,
+  normalizeDocument,
   paginationQuerySchema,
   phoneSchema,
   shortTextSchema,
@@ -61,12 +62,12 @@ export const guardianSchema = z.object({
 });
 export type Guardian = z.infer<typeof guardianSchema>;
 
-export const createGuardianSchema = z.object({
+const guardianFieldsSchema = z.object({
   personType: personTypeSchema.default('individual'),
   name: nameSchema,
   legalName: z.string().trim().max(200).optional(),
   documentKind: z.enum(['cpf', 'cnpj', 'passport', 'none']).default('none'),
-  document: documentNumberSchema.optional(),
+  document: z.string().trim().max(40).optional(),
   email: emailSchema.optional(),
   phonePrimary: phoneSchema.optional(),
   phoneSecondary: phoneSchema.optional(),
@@ -75,9 +76,29 @@ export const createGuardianSchema = z.object({
   notes: z.string().trim().max(4000).optional(),
   tags: z.array(z.string().trim().max(40)).max(20).default([]),
 });
+
+/** O número só faz sentido junto do tipo: CPF e CNPJ conferem os dígitos, passaporte guarda letras. */
+function checkDocument<T extends { documentKind?: IdentityDocumentKind; document?: string }>(
+  value: T,
+  ctx: z.RefinementCtx,
+): T {
+  if (!value.document) return { ...value, document: undefined };
+  if (!value.documentKind) {
+    ctx.addIssue({ code: 'custom', path: ['documentKind'], message: 'Informe o tipo do documento.' });
+    return z.NEVER;
+  }
+  const result = normalizeDocument(value.documentKind, value.document);
+  if ('error' in result) {
+    ctx.addIssue({ code: 'custom', path: ['document'], message: result.error });
+    return z.NEVER;
+  }
+  return { ...value, document: result.value };
+}
+
+export const createGuardianSchema = guardianFieldsSchema.transform(checkDocument);
 export type CreateGuardian = z.infer<typeof createGuardianSchema>;
 
-export const updateGuardianSchema = createGuardianSchema.partial();
+export const updateGuardianSchema = guardianFieldsSchema.partial().transform(checkDocument);
 
 export const listGuardiansQuerySchema = paginationQuerySchema.extend({
   q: z.string().trim().max(120).optional(),

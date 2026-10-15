@@ -41,6 +41,8 @@ import { Field, Input, Select, Textarea } from '@/components/ui/field';
 import { PatientFormSheet } from '@/components/patients/patient-form';
 import { PatientTimeline } from '@/components/patients/patient-timeline';
 import { WeightChart } from '@/components/patients/weight-chart';
+import { DeathSheet } from '@/components/patients/death-sheet';
+import { GenerateDocumentSheet } from '@/components/documents/generate-sheet';
 
 export default function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -70,10 +72,19 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
   const [editOpen, setEditOpen] = useState(false);
   const [weightOpen, setWeightOpen] = useState(false);
   const [allergyOpen, setAllergyOpen] = useState(false);
+  const [deathOpen, setDeathOpen] = useState(false);
+  const [generate, setGenerate] = useState<{ template?: string; fields?: Record<string, string> } | null>(null);
 
   const { data: patient, isLoading, error, refetch } = useQuery({
     queryKey: ['patient', id],
     queryFn: () => api.get<Patient>(`/patients/${id}`),
+  });
+
+  const { data: death } = useQuery({
+    queryKey: ['patient', id, 'death'],
+    queryFn: () =>
+      api.get<{ occurredAt: string; kind: string; causeText: string | null } | null>(`/patients/${id}/death`),
+    enabled: patient?.status === 'deceased' && hasModule('clinical') && can('encounter:read'),
   });
 
   if (error) {
@@ -173,10 +184,33 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
           {patient.status === 'deceased' && (
             <div className="flex items-start gap-2 rounded-[var(--radius)] border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-3 py-2.5 text-[13.5px] text-[var(--danger)]">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                Óbito registrado{patient.deceasedAt ? ` em ${formatDate(patient.deceasedAt)}` : ''}. O prontuário
-                permanece disponível para consulta.
+              <span className="min-w-0 flex-1">
+                Óbito registrado
+                {death?.occurredAt || patient.deceasedAt
+                  ? ` em ${formatDate(death?.occurredAt ?? patient.deceasedAt)}`
+                  : ''}
+                {death?.kind === 'euthanasia' ? ' (eutanásia)' : ''}
+                {death?.causeText ? `. Causa provável: ${death.causeText}` : ''}. O prontuário permanece disponível
+                para consulta.
               </span>
+              {can('document:generate') && hasModule('documents') && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    setGenerate({
+                      template: 'death_certificate',
+                      fields: {
+                        occurredAt: (death?.occurredAt ?? patient.deceasedAt ?? '').slice(0, 10),
+                        cause: death?.causeText ?? '',
+                      },
+                    })
+                  }
+                >
+                  <FileText className="h-4 w-4" />
+                  Atestado de óbito
+                </Button>
+              )}
             </div>
           )}
           {activeAllergies.map((allergy) => {
@@ -383,23 +417,27 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               title="Histórico clínico"
               description="Os eventos mais recentes. O prontuário completo tem tudo."
               action={
-                <Link
-                  href={`/pacientes/${patient.id}/prontuario`}
-                  className="text-[13px] font-medium text-[var(--brand)]"
-                >
-                  Prontuário completo
-                </Link>
+                can('record:read_sensitive') ? (
+                  <Link
+                    href={`/pacientes/${patient.id}/prontuario`}
+                    className="text-[13px] font-medium text-[var(--brand)]"
+                  >
+                    Prontuário completo
+                  </Link>
+                ) : undefined
               }
             />
             <PatientTimeline patientId={patient.id} limit={10} clinicalOnly />
           </Card>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <QuickLink
-              href={`/pacientes/${patient.id}/prontuario`}
-              icon={<Stethoscope className="h-4 w-4" />}
-              label="Atendimentos e evolução"
-            />
+            {can('record:read_sensitive') && (
+              <QuickLink
+                href={`/pacientes/${patient.id}/prontuario`}
+                icon={<Stethoscope className="h-4 w-4" />}
+                label="Atendimentos e evolução"
+              />
+            )}
             <QuickLink
               href={`/exames?pacienteId=${patient.id}`}
               icon={<FlaskConical className="h-4 w-4" />}
@@ -411,6 +449,26 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               label="Documentos do paciente"
             />
           </div>
+
+          {((can('document:generate') && hasModule('documents')) ||
+            (can('death:record') && hasModule('clinical') && patient.status === 'active')) && (
+            <Card>
+              <CardHeader title="Documentos e registros" />
+              <div className="flex flex-wrap gap-2 px-4 py-3">
+                {can('document:generate') && hasModule('documents') && (
+                  <Button variant="secondary" size="sm" onClick={() => setGenerate({})}>
+                    <FileText className="h-4 w-4" />
+                    Atestado, termo ou declaração
+                  </Button>
+                )}
+                {can('death:record') && hasModule('clinical') && patient.status === 'active' && (
+                  <Button variant="ghost" size="sm" onClick={() => setDeathOpen(true)}>
+                    Registrar óbito
+                  </Button>
+                )}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 
@@ -424,6 +482,29 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
           void queryClient.invalidateQueries({ queryKey: ['patient-weights', patient.id] });
           void queryClient.invalidateQueries({ queryKey: ['timeline', patient.id] });
         }}
+      />
+      <DeathSheet
+        open={deathOpen}
+        onOpenChange={setDeathOpen}
+        patient={patient}
+        onRecorded={(recorded) => {
+          // O atestado é o próximo passo: abre já preenchido com o que foi registrado.
+          if (can('document:generate') && hasModule('documents')) {
+            setGenerate({
+              template: 'death_certificate',
+              fields: { occurredAt: recorded.occurredAt, cause: recorded.causeText },
+            });
+          }
+        }}
+      />
+      <GenerateDocumentSheet
+        open={generate !== null}
+        onOpenChange={(next) => {
+          if (!next) setGenerate(null);
+        }}
+        presetPatientId={patient.id}
+        presetTemplate={generate?.template}
+        presetFields={generate?.fields}
       />
       <AllergySheet
         open={allergyOpen}

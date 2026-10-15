@@ -8,6 +8,7 @@ import { api, errorMessage } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { Badge, Card, CardHeader, ListSkeleton, PageHeader } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
+import { Sheet } from '@/components/ui/sheet';
 import { Field, Input, Textarea } from '@/components/ui/field';
 import { Tabs } from '@/components/ui/tabs';
 import { MembersPanel } from '@/components/settings/members-panel';
@@ -129,9 +130,21 @@ function OrganizationPanel() {
   );
 }
 
+/** O que cada módulo põe na mão da equipe, para decidir sem adivinhar. */
+const MODULE_SUMMARY: Partial<Record<ModuleKey, string>> = {
+  core: 'Pacientes, tutores, equipe e configurações.',
+  scheduling: 'Agenda, check-in na recepção e retornos.',
+  clinical: 'Atendimento, prontuário, diagnósticos e receitas.',
+  lab: 'Pedidos de exame, coleta, resultados e laudos.',
+  immunization: 'Vacinas, vermífugos e lembretes de próxima dose.',
+  documents: 'Atestados, termos, laudos e arquivos do paciente.',
+  comms: 'Lembretes e mensagens aos tutores.',
+};
+
 function ModulesPanel() {
   const queryClient = useQueryClient();
   const { can, refresh } = useSession();
+  const [turningOff, setTurningOff] = useState<(typeof MODULES)[number] | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['entitlements'],
@@ -141,10 +154,11 @@ function ModulesPanel() {
   const mutation = useMutation({
     mutationFn: ({ moduleKey, state }: { moduleKey: string; state: 'active' | 'disabled' }) =>
       api.put(`/entitlements/${moduleKey}`, { state }),
-    onSuccess: async () => {
+    onSuccess: async (_result, variables) => {
       await queryClient.invalidateQueries({ queryKey: ['entitlements'] });
       await refresh();
-      toast.success('Módulo atualizado.');
+      toast.success(variables.state === 'active' ? 'Módulo ligado.' : 'Módulo desligado.');
+      setTurningOff(null);
     },
     onError: (error) => toast.error(errorMessage(error)),
   });
@@ -173,7 +187,11 @@ function ModulesPanel() {
                   {module.alwaysOn && <Badge tone="muted">Sempre ativo</Badge>}
                   {state === 'suspended' && <Badge tone="warning">Suspenso</Badge>}
                   {state === 'trial' && <Badge tone="info">Avaliação</Badge>}
+                  {!module.available && !enabled && <Badge tone="muted">Em breve</Badge>}
                 </div>
+                {MODULE_SUMMARY[module.key] && (
+                  <p className="text-[12.5px] text-[var(--ink-2)]">{MODULE_SUMMARY[module.key]}</p>
+                )}
                 {module.dependsOn.length > 0 && (
                   <p className="text-[12.5px] text-[var(--ink-3)]">
                     Depende de {module.dependsOn.map((key) => MODULES.find((m) => m.key === key)?.name ?? key).join(', ')}
@@ -181,15 +199,16 @@ function ModulesPanel() {
                 )}
               </div>
 
-              {can('tenant:update') && !module.alwaysOn && (
+              {can('tenant:update') && !module.alwaysOn && (module.available || enabled) && (
                 <button
                   type="button"
                   role="switch"
                   aria-checked={enabled}
                   aria-label={`${enabled ? 'Desligar' : 'Ligar'} ${module.name}`}
                   disabled={mutation.isPending}
+                  // Desligar tira acesso da equipe na hora: pede confirmação. Ligar não.
                   onClick={() =>
-                    mutation.mutate({ moduleKey: module.key, state: enabled ? 'disabled' : 'active' })
+                    enabled ? setTurningOff(module) : mutation.mutate({ moduleKey: module.key, state: 'active' })
                   }
                   className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
                     enabled ? 'bg-[var(--brand)]' : 'bg-[var(--border-strong)]'
@@ -206,6 +225,35 @@ function ModulesPanel() {
           );
         })}
       </ul>
+
+      <Sheet
+        open={Boolean(turningOff)}
+        onOpenChange={(next) => {
+          if (!next) setTurningOff(null);
+        }}
+        title={turningOff ? `Desligar ${turningOff.name}?` : ''}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setTurningOff(null)} className="sm:w-auto">
+              Manter ligado
+            </Button>
+            <Button
+              variant="danger"
+              loading={mutation.isPending}
+              onClick={() => turningOff && mutation.mutate({ moduleKey: turningOff.key, state: 'disabled' })}
+              className="sm:w-auto"
+            >
+              Desligar
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[14px] text-[var(--ink-2)]">
+          A equipe perde o acesso a {turningOff ? (MODULE_SUMMARY[turningOff.key] ?? turningOff.name).toLowerCase() : ''}{' '}
+          imediatamente, no menu e no servidor. Nada é apagado: ao ligar de novo, tudo volta como estava.
+        </p>
+      </Sheet>
     </Card>
   );
 }

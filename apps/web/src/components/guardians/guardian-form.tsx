@@ -3,13 +3,36 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import type { Guardian } from '@chiron/contracts';
+import { normalizeDocument, type Guardian } from '@chiron/contracts';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
 import { SectionTitle } from '@/components/ui/primitives';
 import { MountWhenOpen } from '@/components/ui/mount-when-open';
+
+/** Máscara enquanto digita: 000.000.000-00 e 00.000.000/0000-00. */
+function maskDocument(kind: string, value: string): string {
+  if (kind === 'passport') return value.toUpperCase().slice(0, 20);
+  const digits = value.replace(/\D/g, '').slice(0, kind === 'cnpj' ? 14 : 11);
+  if (kind === 'cnpj') {
+    return digits
+      .replace(/^(\d{2})(\d)/, '$1.$2')
+      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1/$2')
+      .replace(/(\d{4})(\d)/, '$1-$2');
+  }
+  return digits
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
+const DOCUMENT_PLACEHOLDER: Record<string, string> = {
+  cpf: '000.000.000-00',
+  cnpj: '00.000.000/0000-00',
+  passport: 'Ex.: FZ123456',
+};
 
 function GuardianFormSheetContent({
   open,
@@ -66,7 +89,7 @@ function GuardianFormSheetContent({
         name: name.trim(),
         legalName: legalName.trim() || undefined,
         documentKind,
-        document: document.replace(/\D/g, '') || undefined,
+        document: document.trim() || undefined,
         email: email.trim() || undefined,
         phonePrimary: phonePrimary.trim() || undefined,
         phoneSecondary: phoneSecondary.trim() || undefined,
@@ -108,11 +131,14 @@ function GuardianFormSheetContent({
           </Button>
           <Button
             onClick={() => {
-              if (name.trim().length < 2) {
-                setErrors({ name: 'Informe o nome.' });
-                return;
+              const next: Record<string, string> = {};
+              if (name.trim().length < 2) next.name = 'Informe o nome.';
+              if (document.trim() && documentKind !== 'none') {
+                const checked = normalizeDocument(documentKind, document);
+                if ('error' in checked) next.document = checked.error;
               }
-              mutation.mutate();
+              setErrors(next);
+              if (Object.keys(next).length === 0) mutation.mutate();
             }}
             loading={mutation.isPending}
             className="sm:w-auto"
@@ -154,7 +180,11 @@ function GuardianFormSheetContent({
             <Field label="Documento">
               <Select
                 value={documentKind}
-                onChange={(event) => setDocumentKind(event.target.value as typeof documentKind)}
+                onChange={(event) => {
+                  const next = event.target.value as typeof documentKind;
+                  setDocumentKind(next);
+                  setDocument((current) => (next === 'none' ? '' : maskDocument(next, current)));
+                }}
               >
                 <option value="cpf">CPF</option>
                 <option value="cnpj">CNPJ</option>
@@ -173,10 +203,11 @@ function GuardianFormSheetContent({
             >
               <Input
                 value={document}
-                onChange={(event) => setDocument(event.target.value)}
-                inputMode="numeric"
+                onChange={(event) => setDocument(maskDocument(documentKind, event.target.value))}
+                inputMode={documentKind === 'passport' ? 'text' : 'numeric'}
+                autoCapitalize={documentKind === 'passport' ? 'characters' : undefined}
                 disabled={documentKind === 'none'}
-                placeholder={documentKind === 'cnpj' ? '00.000.000/0000-00' : '000.000.000-00'}
+                placeholder={DOCUMENT_PLACEHOLDER[documentKind]}
               />
             </Field>
           </div>
