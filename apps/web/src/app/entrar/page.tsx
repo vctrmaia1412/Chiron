@@ -166,6 +166,13 @@ function LoginForm() {
         </Button>
       </div>
 
+      <div className="mt-6 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-center">
+        <p className="text-[13.5px] text-[var(--ink-2)]">Ainda não usa o CHIRON na sua clínica?</p>
+        <Button asChild variant="secondary" block className="mt-2">
+          <Link href="/criar-conta">Criar conta grátis</Link>
+        </Button>
+      </div>
+
       <p className="mt-6 flex items-center justify-center gap-1.5 text-[12.5px] text-[var(--ink-3)]">
         <ShieldCheck className="h-3.5 w-3.5" />
         Acesso registrado em auditoria

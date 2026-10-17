@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { MODULES, type ModuleKey } from '@chiron/contracts';
@@ -22,9 +23,25 @@ interface Entitlement {
   expiresAt: string | null;
 }
 
+const TAB_KEYS = ['organizacao', 'equipe', 'modulos', 'catalogos'] as const;
+type TabKey = (typeof TAB_KEYS)[number];
+
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={<ListSkeleton rows={4} />}>
+      <SettingsView />
+    </Suspense>
+  );
+}
+
+function SettingsView() {
   const { context, can } = useSession();
-  const [tab, setTab] = useState<'organizacao' | 'equipe' | 'modulos' | 'catalogos'>('organizacao');
+  const params = useSearchParams();
+  // O link dos primeiros passos aponta a aba; a URL só define o começo.
+  const [tab, setTab] = useState<TabKey>(() => {
+    const preset = params.get('aba');
+    return TAB_KEYS.find((key) => key === preset) ?? 'organizacao';
+  });
 
   return (
     <>

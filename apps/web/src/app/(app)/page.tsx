@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, CalendarDays, ClipboardList, Clock, Plus, Users } from 'lucide-react';
+import { ArrowRight, CalendarDays, ClipboardList, Clock, Plus, Settings2, UserPlus, Users } from 'lucide-react';
 import type { Dashboard } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
 import { formatTime, formatWeekday, relativeTime } from '@/lib/format';
@@ -64,6 +64,8 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="space-y-4 md:space-y-5">
+          {data.metrics.activePatients === 0 && can('patient:create') && <FirstSteps />}
+
           <MetricsRow metrics={data.metrics} />
 
           {data.alerts.length > 0 && <AlertsRow alerts={data.alerts} />}
@@ -142,6 +144,69 @@ function AlertsRow({ alerts }: { alerts: Dashboard['alerts'] }) {
         </Link>
       ))}
     </div>
+  );
+}
+
+/**
+ * Clínica recém-criada, sem nenhum paciente: em vez de um painel de zeros, o
+ * caminho do primeiro dia. Some sozinho quando o primeiro paciente entra.
+ */
+function FirstSteps() {
+  const { can } = useSession();
+  const steps = [
+    {
+      href: '/pacientes?novo=1',
+      icon: Plus,
+      title: 'Cadastre o primeiro paciente',
+      text: 'Tutor e animal juntos, numa tela só.',
+      show: can('patient:create'),
+    },
+    {
+      href: '/agenda?novo=1',
+      icon: CalendarDays,
+      title: 'Marque uma consulta ou atenda agora',
+      text: 'Pela agenda, ou "Atender agora" na ficha do paciente.',
+      show: can('appointment:create'),
+    },
+    {
+      href: '/configuracoes?aba=catalogos',
+      icon: Settings2,
+      title: 'Confira serviços e preços',
+      text: 'Já vêm consulta, retorno, vacinação e outros; ponha os seus preços.',
+      show: can('service:read'),
+    },
+    {
+      href: '/configuracoes?aba=equipe',
+      icon: UserPlus,
+      title: 'Convide sua equipe',
+      text: 'Veterinários, recepção e técnicos, cada um com o seu acesso.',
+      show: can('member:invite'),
+    },
+  ].filter((step) => step.show);
+
+  return (
+    <Card>
+      <CardHeader
+        title="Sua clínica está pronta"
+        description="Quatro passos para começar. Este quadro some quando o primeiro paciente for cadastrado."
+      />
+      <ol className="divide-y divide-[var(--border)]">
+        {steps.map((step, index) => (
+          <li key={step.href}>
+            <Link href={step.href} className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--surface-2)]">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--brand-soft)] text-[13px] font-semibold text-[var(--brand-ink)]">
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14.5px] font-medium text-[var(--ink)]">{step.title}</span>
+                <span className="block text-[12.5px] text-[var(--ink-3)]">{step.text}</span>
+              </span>
+              <step.icon className="h-4 w-4 shrink-0 text-[var(--ink-3)]" />
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </Card>
   );
 }
 

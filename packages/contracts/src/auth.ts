@@ -116,6 +116,7 @@ export const acceptInvitationRequestSchema = z.object({
 
 export const stepUpRequestSchema = z.object({ password: z.string().min(1).max(200) });
 
+
 export const sessionSummarySchema = z.object({
   id: uuidSchema,
   current: z.boolean(),
@@ -283,3 +284,34 @@ export const roleSummarySchema = z.object({
   permissionCount: z.number().int().nonnegative(),
 });
 export type RoleSummary = z.infer<typeof roleSummarySchema>;
+
+/**
+ * Cadastro aberto do piloto: a pessoa cria a própria conta e a clínica numa
+ * tela só e já entra. O CRMV só é exigido de quem diz que é veterinário,
+ * porque é o que permite assinar prontuário e receita.
+ */
+export const signupRequestSchema = z
+  .object({
+    name: z.string().trim().min(2, 'Informe seu nome completo.').max(160),
+    email: emailSchema,
+    password: z.string().min(10, 'A senha precisa ter pelo menos 10 caracteres.').max(200),
+    clinicName: z.string().trim().min(2, 'Informe o nome da clínica.').max(120),
+    city: z.string().trim().max(80).optional(),
+    state: z.enum(BRAZILIAN_STATES).optional(),
+    isVeterinarian: z.boolean().default(true),
+    councilNumber: z.string().trim().max(30).optional(),
+    councilState: z.enum(BRAZILIAN_STATES).optional(),
+    acceptTerms: z.literal(true, 'Confirme que leu as condições do piloto.'),
+    /** Campo-isca: invisível para pessoas, preenchido por robôs. */
+    website: z.string().max(200).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.isVeterinarian) return;
+    if (!value.councilNumber) {
+      ctx.addIssue({ code: 'custom', path: ['councilNumber'], message: 'Informe o número do CRMV.' });
+    }
+    if (!value.councilState) {
+      ctx.addIssue({ code: 'custom', path: ['councilState'], message: 'Escolha a UF do CRMV.' });
+    }
+  });
+export type SignupRequest = z.infer<typeof signupRequestSchema>;

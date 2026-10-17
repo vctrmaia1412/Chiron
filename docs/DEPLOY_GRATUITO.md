@@ -408,6 +408,50 @@ bash infra/scripts/dc.sh logs api | grep 'redefinição'   # "esqueci minha senh
 Cada linha traz o destinatário (`to`) e o link (`link` ou `resetUrl`). Envie
 o link só para a pessoa certa: ele dá acesso à conta dela.
 
+### 10.1 Piloto com demonstração e cadastro aberto (um servidor só)
+
+É o modo do piloto com veterinários: no mesmo endereço convivem
+
+- a **demonstração**, com os logins de teste (`vet@chiron.dev`,
+  `recepcao@chiron.dev`, `admin@chiron.dev` etc., senha `Chiron@2026`), para
+  conhecer o sistema com dados fictícios;
+- o **cadastro aberto**: na tela de login, "Criar conta grátis" cria a conta e
+  a clínica do veterinário, já com os serviços mais comuns, e ele entra na
+  hora. Cada clínica só enxerga os próprios dados (RLS no banco).
+
+O cadastro vem ligado (`SIGNUP_ENABLED=true` no `.env.stack`; `false` fecha e
+só entra quem for convidado). Cada rede cria no máximo 5 clínicas por hora
+(`SIGNUP_PER_IP_PER_HOUR`).
+
+Depois de subir o sistema (seção 9), crie a demonstração uma vez:
+
+```bash
+cd /opt/chiron
+bash infra/scripts/dc.sh run --rm --no-deps -e NODE_ENV=development migrate node dist/database/seed.js
+```
+
+O seed só apaga e recria as clínicas `demo` e `beta`. As clínicas criadas pelo
+cadastro não são tocadas. Para zerar a demonstração toda madrugada (quem
+testou deixa bagunça, ou troca a senha de um login de teste):
+
+```bash
+( crontab -l 2>/dev/null; echo '30 6 * * * cd /opt/chiron && bash infra/scripts/dc.sh run --rm --no-deps -e NODE_ENV=development migrate node dist/database/seed.js >> /var/log/chiron-demo.log 2>&1' ) | crontab -
+```
+
+`30 6` em UTC é 03h30 em Brasília. Rode **só de madrugada**: para apagar as
+clínicas de teste, o seed trava as tabelas por alguns segundos e o sistema
+fica parado nesse tempo.
+
+Cuidados deste modo:
+
+- os logins de teste têm senha pública. Eles só enxergam `demo` e `beta`, mas
+  qualquer pessoa entra na demonstração. A tela avisa em todas as páginas que
+  ali é demonstração e não aceita paciente real;
+- **ninguém de clínica real é convidado para dentro de `demo` ou `beta`**:
+  o reset apagaria o acesso dele;
+- quando o piloto virar produção paga, desligue a demonstração neste servidor
+  (tire o cron e apague `demo` e `beta`) ou mova-a para outra VM (seção 14).
+
 ---
 
 ## 11. Backup diário
@@ -646,8 +690,9 @@ bash infra/scripts/gerar-env.sh
 bash infra/scripts/dc.sh up -d
 ```
 
-Nunca rode o seed na VM do piloto. Em modo piloto (`APP_ENV=homolog`), o
-`NODE_ENV=development` passaria pela trava.
+Na VM do piloto, o seed só roda no modo da [seção 10.1](#101-piloto-com-demonstração-e-cadastro-aberto-um-servidor-só),
+de madrugada. Em modo piloto (`APP_ENV=homolog`), o `NODE_ENV=development`
+passa pela trava: o cuidado é de quem roda.
 
 ---
 
@@ -735,8 +780,9 @@ houver lembretes por e-mail.
 
 ## 18. O que NÃO fazer
 
-- **Não rodar o seed de demonstração no servidor do piloto.** Ele apaga e
-  recria organizações e usa senha conhecida.
+- **Não rodar o seed em horário de clínica** nem num servidor de produção
+  paga. No piloto com demonstração (seção 10.1) ele só recria `demo` e `beta`,
+  mas trava as tabelas por alguns segundos e usa senha conhecida.
 - **Não regenerar o `.env.stack`** nem perder a `COLUMN_ENCRYPTION_KEY`.
 - **Não guardar a chave privada do `age` na VM**, nem junto do backup.
 - **Não rodar `bash infra/scripts/dc.sh down -v` nem `docker volume prune`**

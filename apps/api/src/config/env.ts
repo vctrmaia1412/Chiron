@@ -54,6 +54,10 @@ const baseEnvSchema = z.object({
   /** Origens extras permitidas, separadas por vírgula (proxy, domínio alternativo). */
   EXTRA_ALLOWED_ORIGINS: z.string().default(''),
   API_PREFIX: z.string().default('/api/v1'),
+  /** Cadastro aberto ("Criar conta"): cada pessoa cria a própria clínica. Desligue para só convidar. */
+  SIGNUP_ENABLED: envBoolean(true),
+  /** Clínicas criadas pelo mesmo IP por hora: freio contra robô sem CAPTCHA. */
+  SIGNUP_PER_IP_PER_HOUR: z.coerce.number().int().min(1).default(5),
 
   SESSION_SECRET: z.string().min(32),
   SESSION_TTL_HOURS: z.coerce.number().int().default(12),

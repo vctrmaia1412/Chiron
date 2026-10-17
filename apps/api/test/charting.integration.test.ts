@@ -181,6 +181,8 @@ describe('registro rápido', () => {
           serviceId: consultaId,
           startAt: start.toISOString(),
           reason: 'Mancando da pata traseira',
+          // o seed ocupa a agenda relativa a hoje: o teste é da queixa, não do conflito
+          allowOverlap: true,
         },
       });
       expect(appointment.status, JSON.stringify(appointment.body)).toBe(201);

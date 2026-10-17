@@ -125,7 +125,9 @@ export function Checkbox({
   className,
   ...props
 }: { label: React.ReactNode } & React.InputHTMLAttributes<HTMLInputElement>) {
-  const id = useId();
+  const generatedId = useId();
+  // id vindo de fora (para focar o campo com erro) vale também para o rótulo
+  const id = props.id ?? generatedId;
   return (
     <label
       htmlFor={id}

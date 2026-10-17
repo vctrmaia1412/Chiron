@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ApiError } from '@/lib/api';
 import { loginUrl, useSession } from '@/lib/session';
@@ -74,6 +75,25 @@ function NoActiveOrganization() {
   );
 }
 
+/** Clínicas de demonstração recebem dados fictícios e são reiniciadas: dado real não entra aqui. */
+const DEMO_SLUGS = ['demo', 'beta'];
+
+function DemoNotice() {
+  const { context } = useSession();
+  if (!context?.tenant || !DEMO_SLUGS.includes(context.tenant.slug)) return null;
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[var(--radius)] border border-[var(--warning)]/30 bg-[var(--warning-soft)] px-3 py-2 text-[13px] text-[var(--ink-2)]">
+      <span className="min-w-0 flex-1">
+        <strong className="font-semibold text-[var(--ink)]">Demonstração:</strong> dados fictícios, reiniciados de tempos em
+        tempos. Não cadastre pacientes reais aqui.
+      </span>
+      <Link href="/criar-conta" className="font-medium text-[var(--brand)]">
+        Criar minha clínica
+      </Link>
+    </div>
+  );
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { context, loading, error } = useSession();
@@ -119,6 +139,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <main className="min-w-0 flex-1 px-4 pb-[calc(var(--mobilenav-h)+env(safe-area-inset-bottom)+16px)] pt-4 md:px-6 md:pt-6 lg:pb-10">
+          <DemoNotice />
           {children}
           <ActiveEncounterPill />
         </main>

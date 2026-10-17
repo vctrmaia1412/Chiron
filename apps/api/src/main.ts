@@ -120,7 +120,7 @@ async function registerRateLimit(app: NestFastifyApplication, cfg: Env): Promise
   // Rotas públicas que rodam argon2id (19 MB de memória por tentativa) ou
   // queimam token de uso único: cota bem menor que a do resto da API.
   const authPaths = new Set(
-    ['auth/login', 'auth/password/forgot', 'auth/password/reset', 'auth/invitations/accept'].map(
+    ['auth/login', 'auth/signup', 'auth/password/forgot', 'auth/password/reset', 'auth/invitations/accept'].map(
       (route) => `${prefix}/${route}`,
     ),
   );
