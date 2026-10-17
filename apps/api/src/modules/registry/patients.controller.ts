@@ -2,14 +2,22 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@
 import { z } from 'zod';
 import {
   addPatientGuardianSchema,
+  addPatientIdentifierSchema,
   createAlertSchema,
   createAllergySchema,
   createPatientSchema,
+  inactivatePatientSchema,
   listPatientsQuerySchema,
   recordDeathSchema,
+  updateAllergyStatusSchema,
   updatePatientSchema,
+  type AddPatientGuardian,
+  type AddPatientIdentifier,
   type CreatePatient,
+  type InactivatePatient,
+  type ListPatientsQuery,
   type RecordDeath,
+  type UpdateAllergyStatus,
 } from '@chiron/contracts';
 import { PatientsService } from './patients.service';
 import { Authorize } from '../../auth/authorize.decorator';
@@ -27,23 +35,14 @@ const recordWeightSchema = z.object({
   uom: z.enum(['kg', 'g']).default('kg'),
 });
 
-const addIdentifierSchema = z.object({
-  scheme: z.enum(['microchip', 'ear_tag', 'sisbov', 'leg_band', 'passport', 'registry', 'tattoo', 'license', 'internal']),
-  value: z.string().trim().min(1).max(80),
-  issuer: z.string().trim().max(80).optional(),
-});
-
 @Controller('patients')
 export class PatientsController {
   constructor(private readonly patients: PatientsService) {}
 
   @Get()
   @Authorize('core', 'patient:read')
-  list(
-    @Req() req: AuthedRequest,
-    @Query(zQuery(listPatientsQuerySchema)) query: Record<string, never> & { limit: number },
-  ) {
-    return this.patients.list(ctxOf(req), query as never);
+  list(@Req() req: AuthedRequest, @Query(zQuery(listPatientsQuerySchema)) query: ListPatientsQuery) {
+    return this.patients.list(ctxOf(req), query);
   }
 
   @Get(':id')
@@ -75,26 +74,51 @@ export class PatientsController {
     return { ok: true };
   }
 
-  @Post(':id/guardians')
+  /** Inativar é reversível e pede motivo: mesma permissão de editar o cadastro. */
+  @Post(':id/inactivate')
   @Authorize('core', 'patient:update')
-  async addGuardian(
+  inactivate(
     @Req() req: AuthedRequest,
     @Param('id') id: string,
-    @Body(zBody(addPatientGuardianSchema)) body: { guardianId: string; role: string; isPrimary: boolean },
+    @Body(zBody(inactivatePatientSchema)) body: InactivatePatient,
   ) {
-    await this.patients.addGuardian(ctxOf(req), id, body);
-    return { ok: true };
+    return this.patients.inactivate(ctxOf(req), id, body);
   }
 
-  @Delete(':id/guardians/:guardianId')
+  @Post(':id/reactivate')
   @Authorize('core', 'patient:update')
-  async removeGuardian(
+  reactivate(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.patients.reactivate(ctxOf(req), id);
+  }
+
+  @Post(':id/guardians')
+  @Authorize('core', 'patient:update')
+  addGuardian(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body(zBody(addPatientGuardianSchema)) body: AddPatientGuardian,
+  ) {
+    return this.patients.addGuardian(ctxOf(req), id, body);
+  }
+
+  @Post(':id/guardians/:guardianId/primary')
+  @Authorize('core', 'patient:update')
+  setPrimaryGuardian(
     @Req() req: AuthedRequest,
     @Param('id') id: string,
     @Param('guardianId') guardianId: string,
   ) {
-    await this.patients.removeGuardian(ctxOf(req), id, guardianId);
-    return { ok: true };
+    return this.patients.setPrimaryGuardian(ctxOf(req), id, guardianId);
+  }
+
+  @Delete(':id/guardians/:guardianId')
+  @Authorize('core', 'patient:update')
+  removeGuardian(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Param('guardianId') guardianId: string,
+  ) {
+    return this.patients.removeGuardian(ctxOf(req), id, guardianId);
   }
 
   @Post(':id/identifiers')
@@ -102,9 +126,20 @@ export class PatientsController {
   addIdentifier(
     @Req() req: AuthedRequest,
     @Param('id') id: string,
-    @Body(zBody(addIdentifierSchema)) body: z.infer<typeof addIdentifierSchema>,
+    @Body(zBody(addPatientIdentifierSchema)) body: AddPatientIdentifier,
   ) {
     return this.patients.addIdentifier(ctxOf(req), id, body);
+  }
+
+  @Delete(':id/identifiers/:identifierId')
+  @Authorize('core', 'patient:update')
+  async removeIdentifier(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Param('identifierId') identifierId: string,
+  ) {
+    await this.patients.removeIdentifier(ctxOf(req), id, identifierId);
+    return { ok: true };
   }
 
   @Post(':id/allergies')
@@ -117,6 +152,21 @@ export class PatientsController {
     return this.patients.addAllergy(ctxOf(req), id, body);
   }
 
+  /**
+   * Registrar alergia qualquer um do cadastro pode (errar para o lado seguro);
+   * tirar da lista ativa é decisão clínica.
+   */
+  @Patch(':id/allergies/:allergyId')
+  @Authorize('clinical', 'encounter:update')
+  updateAllergyStatus(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Param('allergyId') allergyId: string,
+    @Body(zBody(updateAllergyStatusSchema)) body: UpdateAllergyStatus,
+  ) {
+    return this.patients.updateAllergyStatus(ctxOf(req), id, allergyId, body);
+  }
+
   @Post(':id/alerts')
   @Authorize('core', 'patient:update')
   addAlert(
@@ -125,6 +175,17 @@ export class PatientsController {
     @Body(zBody(createAlertSchema)) body: { kind: string; message: string },
   ) {
     return this.patients.addAlert(ctxOf(req), id, body);
+  }
+
+  @Delete(':id/alerts/:alertId')
+  @Authorize('core', 'patient:update')
+  async deactivateAlert(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Param('alertId') alertId: string,
+  ) {
+    await this.patients.deactivateAlert(ctxOf(req), id, alertId);
+    return { ok: true };
   }
 
   /** Pesagem avulsa: recepção pode registrar sem abrir atendimento. */

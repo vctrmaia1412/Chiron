@@ -7,7 +7,7 @@ import { AlertTriangle } from 'lucide-react';
 import type { Appointment, Patient, PatientListItem } from '@chiron/contracts';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { useProfessionals, useServices } from '@/lib/catalog';
-import { toIsoDate } from '@/lib/format';
+import { formatDateTime, formatTime, toIsoDate } from '@/lib/format';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
@@ -19,27 +19,37 @@ function AppointmentFormSheetContent({
   onOpenChange,
   defaultDate,
   defaultPatientId,
+  defaultReason,
+  originEncounterId,
+  appointment,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultDate?: Date;
   defaultPatientId?: string;
+  defaultReason?: string;
+  /** Atendimento que pediu o retorno: o agendamento sai da lista de retornos. */
+  originEncounterId?: string;
+  /** Agendamento existente: o formulário vira "Remarcar". */
+  appointment?: Appointment | null;
   onSaved?: (appointment: Appointment) => void;
 }) {
   const queryClient = useQueryClient();
   const { data: services = [] } = useServices();
   const { data: professionals = [] } = useProfessionals();
+  const editing = Boolean(appointment);
+  const initialStart = appointment ? new Date(appointment.startAt) : null;
 
   const [chosenPatient, setChosenPatient] = useState<
     { id: string; name: string; guardianId?: string | null } | null
   >(null);
-  const [chosenServiceId, setChosenServiceId] = useState('');
-  const [professionalId, setProfessionalId] = useState('');
-  const [date, setDate] = useState(() => toIsoDate(defaultDate ?? new Date()));
-  const [time, setTime] = useState('09:00');
-  const [reason, setReason] = useState('');
-  const [notes, setNotes] = useState('');
+  const [chosenServiceId, setChosenServiceId] = useState(appointment?.service.id ?? '');
+  const [professionalId, setProfessionalId] = useState(appointment?.professional?.id ?? '');
+  const [date, setDate] = useState(() => toIsoDate(initialStart ?? defaultDate ?? new Date()));
+  const [time, setTime] = useState(() => (initialStart ? formatTime(appointment!.startAt) : '09:00'));
+  const [reason, setReason] = useState(appointment?.reason ?? defaultReason ?? '');
+  const [notes, setNotes] = useState(appointment?.notes ?? '');
   const [allowOverlap, setAllowOverlap] = useState(false);
   const [conflict, setConflict] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -47,17 +57,22 @@ function AppointmentFormSheetContent({
   const { data: preset } = useQuery({
     queryKey: ['patient', defaultPatientId],
     queryFn: () => api.get<Patient>(`/patients/${defaultPatientId}`),
-    enabled: Boolean(defaultPatientId),
+    enabled: Boolean(defaultPatientId) && !editing,
   });
 
   // Paciente vindo por parâmetro é derivado da consulta, não copiado para o
   // estado: evita o descompasso entre o que chegou e o que está na tela.
   const patient = useMemo(() => {
+    if (appointment) {
+      return appointment.patient
+        ? { id: appointment.patient.id, name: appointment.patient.name, guardianId: appointment.guardian?.id ?? null }
+        : null;
+    }
     if (chosenPatient) return chosenPatient;
     if (!preset) return null;
     const primary = preset.guardians.find((g) => g.isPrimary) ?? preset.guardians[0];
     return { id: preset.id, name: preset.name, guardianId: primary?.guardianId ?? null };
-  }, [chosenPatient, preset]);
+  }, [appointment, chosenPatient, preset]);
 
   // Consulta é o serviço mais frequente: entra pré-selecionado assim que o
   // catálogo carrega, sem efeito copiando valor para o estado.
@@ -67,24 +82,37 @@ function AppointmentFormSheetContent({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const startAt = new Date(`${date}T${time}:00`);
+      const startAt = new Date(`${date}T${time}:00`).toISOString();
+      if (appointment) {
+        return api.patch<Appointment>(`/appointments/${appointment.id}`, {
+          professionalId: professionalId || null,
+          serviceId,
+          startAt,
+          reason: reason.trim() || null,
+          notes: notes.trim() || null,
+          allowOverlap,
+          expectedVersion: appointment.version,
+        });
+      }
       return api.post<Appointment>('/appointments', {
         patientId: patient?.id,
         guardianId: patient?.guardianId ?? undefined,
         professionalId: professionalId || undefined,
         serviceId,
-        startAt: startAt.toISOString(),
+        startAt,
         reason: reason.trim() || undefined,
         notes: notes.trim() || undefined,
+        originEncounterId,
         allowOverlap,
       });
     },
-    onSuccess: async (appointment) => {
+    onSuccess: async (saved) => {
       await queryClient.invalidateQueries({ queryKey: ['appointments'] });
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success('Agendamento criado.');
+      if (originEncounterId) await queryClient.invalidateQueries({ queryKey: ['follow-ups'] });
+      toast.success(editing ? 'Agendamento remarcado.' : 'Agendamento criado.');
       onOpenChange(false);
-      onSaved?.(appointment);
+      onSaved?.(saved);
     },
     onError: (error) => {
       if (error instanceof ApiError && error.isConflict) {
@@ -97,7 +125,7 @@ function AppointmentFormSheetContent({
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (!patient) next.patient = 'Escolha o paciente.';
+    if (!patient && !editing) next.patient = 'Escolha o paciente.';
     if (!serviceId) next.serviceId = 'Escolha o serviço.';
     if (!date) next.date = 'Informe a data.';
     if (!time) next.time = 'Informe o horário.';
@@ -112,7 +140,8 @@ function AppointmentFormSheetContent({
     <Sheet
       open={open}
       onOpenChange={onOpenChange}
-      title="Novo agendamento"
+      title={editing ? 'Remarcar' : originEncounterId ? 'Agendar retorno' : 'Novo agendamento'}
+      description={appointment ? `Hoje: ${formatDateTime(appointment.startAt)}` : undefined}
       size="md"
       footer={
         <>
@@ -127,13 +156,22 @@ function AppointmentFormSheetContent({
             loading={mutation.isPending}
             className="sm:w-auto"
           >
-            Agendar
+            {editing ? 'Salvar novo horário' : 'Agendar'}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        <PatientPicker value={patient} onChange={setChosenPatient} error={errors.patient} />
+        {editing ? (
+          <div className="rounded-[var(--radius)] bg-[var(--surface-2)] px-3 py-2">
+            <p className="text-[12px] text-[var(--ink-3)]">Paciente</p>
+            <p className="text-[14.5px] font-medium text-[var(--ink)]">
+              {patient?.name ?? appointment?.guardian?.name ?? 'Sem paciente'}
+            </p>
+          </div>
+        ) : (
+          <PatientPicker value={patient} onChange={setChosenPatient} error={errors.patient} allowCreate />
+        )}
 
         <Field label="Serviço" required error={errors.serviceId}>
           <Select value={serviceId} onChange={(event) => setChosenServiceId(event.target.value)}>

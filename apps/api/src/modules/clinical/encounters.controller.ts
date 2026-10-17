@@ -86,6 +86,12 @@ export class EncountersController {
     return this.encounters.transition(ctxOf(req), id, 'in_progress');
   }
 
+  @Post('encounters/:id/assume')
+  @Authorize('clinical', 'encounter:sign')
+  assume(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.encounters.assume(ctxOf(req), id);
+  }
+
   @Post('encounters/:id/cancel')
   @Authorize('clinical', 'encounter:cancel')
   cancel(

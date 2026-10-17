@@ -3,6 +3,8 @@ import type { PoolClient } from 'pg';
 import {
   MODULES,
   PLAN_BY_KEY,
+  type InvitationPreview,
+  type InvitationStatus,
   type LoginRequest,
   type LoginResponse,
   type MeContext,
@@ -32,7 +34,25 @@ interface InvitationRow {
   facility_ids: string[];
   all_facilities: boolean;
   professional: { council?: string; councilNumber?: string; councilState?: string; specialties?: string[] } | null;
+  accepted_at: Date | null;
+  revoked_at: Date | null;
+  expired: boolean;
 }
+
+/** Por que o link não serve mais. Vai em `details.reason` do 422 do aceite. */
+type InvitationUnavailableReason = Exclude<InvitationStatus, 'pending'> | 'not_found';
+
+/**
+ * Mensagem de link que não serve mais, sempre com o próximo passo: a pessoa
+ * do outro lado não tem a quem perguntar a não ser a clínica.
+ */
+const UNAVAILABLE_INVITATION_MESSAGE: Record<InvitationUnavailableReason, string> = {
+  not_found:
+    'Este link de convite não é válido. Use o link do e-mail mais recente ou peça um novo convite à clínica.',
+  expired: 'Este convite expirou. Peça à clínica para reenviar o convite.',
+  revoked: 'Este convite foi cancelado pela clínica. Se ainda precisa de acesso, peça um novo convite.',
+  accepted: 'Este convite já foi usado. Entre com seu e-mail e senha.',
+};
 
 /**
  * Desfecho do aceite de convite. A verificação de senha acontece dentro da
@@ -40,11 +60,32 @@ interface InvitationRow {
  * isso o caminho de falha volta como valor em vez de exceção.
  */
 type AcceptOutcome =
-  | { kind: 'invalid_invitation' }
+  | { kind: 'invalid_invitation'; reason: InvitationUnavailableReason }
   | { kind: 'password_required' }
   | { kind: 'password_rejected' }
   | { kind: 'password_failed'; userId: string; attempts: number; tenantId: string; invitationId: string }
-  | { kind: 'accepted'; invitation: InvitationRow; userId: string; existingAccount: boolean };
+  | {
+      kind: 'accepted';
+      invitation: InvitationRow;
+      userId: string;
+      existingAccount: boolean;
+      accountName: string | null;
+    };
+
+/** `ana.souza@clinica.com.br` vira `an•••@clinica.com.br`: dá para reconhecer, não para copiar. */
+function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  if (at <= 0) return '•••';
+  const local = email.slice(0, at);
+  return `${local.slice(0, local.length > 2 ? 2 : 1)}•••@${email.slice(at + 1)}`;
+}
+
+function invitationStatusOf(row: { accepted_at: Date | null; revoked_at: Date | null; expired: boolean }): InvitationStatus {
+  if (row.accepted_at) return 'accepted';
+  if (row.revoked_at) return 'revoked';
+  if (row.expired) return 'expired';
+  return 'pending';
+}
 
 /** Evento de autenticação para `audit.audit_log` (categoria `auth`). */
 interface AuthEvent {
@@ -610,6 +651,80 @@ export class IdentityService {
     });
   }
 
+  /**
+   * O que a tela de aceite mostra antes de pedir qualquer coisa: quem
+   * convidou, para qual clínica e papel, até quando vale e se o e-mail já tem
+   * conta. Dizer que a conta existe só a quem tem o token não abre oráculo de
+   * cadastro: o token chega apenas ao próprio e-mail convidado (ADR 0012).
+   */
+  async previewInvitation(token: string): Promise<InvitationPreview> {
+    // Token fora do formato nem vai ao banco: é convite que não existe.
+    if (token.length < 20 || token.length > 200) throw AppError.notFound('Convite');
+    const tokenHash = this.crypto.tokenHash(token);
+
+    const invitation = await this.db.withIam({ tenantId: null, invitationTokenHash: tokenHash }, async (tx) => {
+      const { rows } = await tx.query<{
+        tenant_id: string;
+        email: string;
+        name: string | null;
+        role_id: string;
+        invited_by: string | null;
+        expires_at: Date;
+        accepted_at: Date | null;
+        revoked_at: Date | null;
+        expired: boolean;
+      }>(
+        `SELECT tenant_id, email::text AS email, name, role_id, invited_by, expires_at, accepted_at, revoked_at,
+                expires_at <= now() AS expired
+           FROM iam.invitations WHERE token_hash = $1`,
+        [tokenHash],
+      );
+      return rows[0] ?? null;
+    });
+    if (!invitation) throw AppError.notFound('Convite');
+
+    const status = invitationStatusOf(invitation);
+
+    // O tenant sai do próprio convite, achado pelo hash do token, como no
+    // aceite. Aqui é só leitura do nome da organização e do papel.
+    const names = await this.db.withIam(
+      { tenantId: invitation.tenant_id, invitationTokenHash: tokenHash },
+      async (tx) => {
+        const tenant = await tx.query<{ name: string }>(`SELECT name FROM platform.tenants WHERE id = $1`, [
+          invitation.tenant_id,
+        ]);
+        const role = await tx.query<{ name: string }>(`SELECT name FROM iam.roles WHERE id = $1`, [invitation.role_id]);
+        const inviter = invitation.invited_by
+          ? await tx.query<{ name: string }>(`SELECT name FROM iam.users WHERE id = $1`, [invitation.invited_by])
+          : null;
+        const account =
+          status === 'pending'
+            ? await tx.query(
+                `SELECT 1 FROM iam.users WHERE email = $1 AND password_hash IS NOT NULL AND deleted_at IS NULL`,
+                [invitation.email],
+              )
+            : null;
+        return {
+          organizationName: tenant.rows[0]?.name ?? 'a clínica',
+          roleName: role.rows[0]?.name ?? 'membro da equipe',
+          invitedByName: inviter?.rows[0]?.name ?? null,
+          hasAccount: (account?.rowCount ?? 0) > 0,
+        };
+      },
+    );
+
+    return {
+      status,
+      organizationName: names.organizationName,
+      roleName: names.roleName,
+      invitedByName: names.invitedByName,
+      emailMasked: maskEmail(invitation.email),
+      name: status === 'pending' ? invitation.name : null,
+      expiresAt: invitation.expires_at.toISOString(),
+      hasAccount: names.hasAccount,
+    };
+  }
+
   async acceptInvitation(
     token: string,
     payload: { name?: string; password?: string },
@@ -629,25 +744,31 @@ export class IdentityService {
     const outcome = await this.db.withIam<AcceptOutcome>(
       { tenantId: null, invitationTokenHash: tokenHash },
       async (tx: PoolClient) => {
+        // Sem filtro de situação no WHERE: o motivo da recusa (vencido,
+        // revogado, já usado) volta para a tela dizer o que fazer.
         const { rows } = await tx.query<InvitationRow>(
-          `SELECT id, tenant_id, email, name, role_id, facility_ids, all_facilities, professional
+          `SELECT id, tenant_id, email, name, role_id, facility_ids, all_facilities, professional,
+                  accepted_at, revoked_at, expires_at <= now() AS expired
              FROM iam.invitations
-            WHERE token_hash = $1 AND accepted_at IS NULL AND expires_at > now()
+            WHERE token_hash = $1
             FOR UPDATE`,
           [tokenHash],
         );
         const invitation = rows[0];
-        if (!invitation) return { kind: 'invalid_invitation' };
+        if (!invitation) return { kind: 'invalid_invitation', reason: 'not_found' };
+        const status = invitationStatusOf(invitation);
+        if (status !== 'pending') return { kind: 'invalid_invitation', reason: status };
 
         const existing = await tx.query<{
           id: string;
+          name: string;
           password_hash: string | null;
           status: string;
           locked_until: Date | null;
           failed_login_attempts: number;
           deleted_at: Date | null;
         }>(
-          `SELECT id, password_hash, status, locked_until, failed_login_attempts, deleted_at
+          `SELECT id, name, password_hash, status, locked_until, failed_login_attempts, deleted_at
              FROM iam.users WHERE email = $1`,
           [invitation.email],
         );
@@ -705,11 +826,16 @@ export class IdentityService {
 
         await tx.query(`UPDATE iam.invitations SET accepted_at = now() WHERE id = $1`, [invitation.id]);
 
-        return { kind: 'accepted', invitation, userId, existingAccount };
+        // Só a conta que já tinha senha mantém o próprio nome; a que está
+        // definindo senha agora acabou de digitar o nome no formulário.
+        const accountName = user?.password_hash ? user.name : null;
+        return { kind: 'accepted', invitation, userId, existingAccount, accountName };
       },
     );
 
-    if (outcome.kind === 'invalid_invitation') throw AppError.validation('Convite inválido ou expirado.');
+    if (outcome.kind === 'invalid_invitation') {
+      throw AppError.validation(UNAVAILABLE_INVITATION_MESSAGE[outcome.reason], { reason: outcome.reason });
+    }
     if (outcome.kind === 'password_required' || outcome.kind === 'password_rejected') throw invalidPassword;
     if (outcome.kind === 'password_failed') {
       const failure = await this.registerFailedPassword(outcome.userId, outcome.attempts);
@@ -727,7 +853,7 @@ export class IdentityService {
       throw invalidPassword;
     }
 
-    const { invitation, userId, existingAccount } = outcome;
+    const { invitation, userId, existingAccount, accountName } = outcome;
 
     // Criação da membership dentro do contexto do tenant (RLS ativo).
     const membershipId = await this.db.withTenant(
@@ -744,7 +870,9 @@ export class IdentityService {
               professionalId,
               invitation.tenant_id,
               userId,
-              payload.name ?? invitation.name ?? invitation.email,
+              // Conta existente aceita só com a senha, sem digitar nome: o
+              // profissional leva o nome que a pessoa já usa no sistema.
+              accountName ?? payload.name ?? invitation.name ?? invitation.email,
               invitation.professional.council ?? 'CRMV',
               invitation.professional.councilNumber,
               invitation.professional.councilState ?? null,

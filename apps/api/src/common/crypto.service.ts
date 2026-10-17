@@ -61,7 +61,8 @@ export class CryptoService {
     const digits = value.replace(/\D/g, '');
     if (digits.length === 11) return `***.***.${digits.slice(6, 9)}-${digits.slice(9)}`;
     if (digits.length === 14) return `**.***.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
-    return `***${digits.slice(-3)}`;
+    // passaporte: letras contam
+    return `***${value.replace(/[^0-9A-Za-z]/g, '').slice(-3)}`;
   }
 
   /** Hash de token de uso único (convite, reset de senha). */

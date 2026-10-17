@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import type { LoginResponse, TenantSummary } from '@chiron/contracts';
 import { ApiError, api, errorMessage, setActiveTenantId } from '@/lib/api';
+import { safeReturnPath } from '@/lib/session';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 import { Logo } from '@/components/brand/logo';
@@ -45,7 +46,7 @@ function LoginForm() {
 
       setActiveTenantId(response.activeTenantId);
       queryClient.clear();
-      router.replace('/');
+      router.replace(safeReturnPath(params.get('voltar')));
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'ACCOUNT_LOCKED') {
         setError('Conta bloqueada temporariamente por tentativas de acesso. Tente novamente em alguns minutos.');
@@ -63,7 +64,7 @@ function LoginForm() {
       await api.post('/me/context', { tenantId });
       setActiveTenantId(tenantId);
       queryClient.clear();
-      router.replace('/');
+      router.replace(safeReturnPath(params.get('voltar')));
     } catch (caught) {
       setError(errorMessage(caught));
       setSubmitting(false);
@@ -147,7 +148,10 @@ function LoginForm() {
       </div>
 
       {error && (
-        <div className="mt-4 rounded-[var(--radius)] bg-[var(--danger-soft)] px-3 py-2.5 text-[13px] text-[var(--danger)]">
+        <div
+          role="alert"
+          className="mt-4 rounded-[var(--radius)] bg-[var(--danger-soft)] px-3 py-2.5 text-[13px] text-[var(--danger)]"
+        >
           {error}
         </div>
       )}
@@ -159,6 +163,13 @@ function LoginForm() {
       <div className="mt-2 flex justify-center">
         <Button asChild variant="link" size="sm">
           <Link href="/esqueci-senha">Esqueci minha senha</Link>
+        </Button>
+      </div>
+
+      <div className="mt-6 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-center">
+        <p className="text-[13.5px] text-[var(--ink-2)]">Ainda não usa o CHIRON na sua clínica?</p>
+        <Button asChild variant="secondary" block className="mt-2">
+          <Link href="/criar-conta">Criar conta grátis</Link>
         </Button>
       </div>
 

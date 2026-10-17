@@ -54,13 +54,20 @@ export interface VaccinationCardInput {
 export interface MedicalRecordPdfInput {
   tenantName: string;
   patient: { name: string; species: string; breed: string | null; guardianName: string | null; birthDate: string | null };
+  allergies: string[];
+  vaccines: string[];
   encounters: Array<{
     date: string;
     service: string | null;
     professional: string | null;
     status: string;
+    weight: string | null;
+    followUp: string | null;
     sections: Array<{ title: string; body: string }>;
     diagnoses: string[];
+    procedures: string[];
+    prescriptions: string[];
+    exams: string[];
   }>;
 }
 
@@ -269,7 +276,21 @@ export class PdfService {
       if (input.patient.guardianName) this.labeled(doc, 'Tutor', input.patient.guardianName);
       if (input.patient.birthDate) this.labeled(doc, 'Nascimento', input.patient.birthDate);
       this.labeled(doc, 'Emitido em', new Date().toLocaleString('pt-BR'));
-      doc.moveDown(0.8);
+      doc.moveDown(0.6);
+
+      if (input.allergies.length > 0) {
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('#B91C1C').text('Alergias');
+        doc.font('Helvetica').fontSize(9).fillColor('#0F172A').text(input.allergies.join('; '), { lineGap: 2 });
+        doc.moveDown(0.5);
+      }
+
+      if (input.vaccines.length > 0) {
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('#0F766E').text('Vacinas e preventivos');
+        doc.font('Helvetica').fontSize(9).fillColor('#0F172A');
+        for (const line of input.vaccines) doc.text(line, { lineGap: 1 });
+        doc.moveDown(0.5);
+      }
+      doc.moveDown(0.3);
 
       if (input.encounters.length === 0) {
         doc.font('Helvetica').fontSize(10).fillColor('#64748B').text('Nenhum atendimento registrado.');
@@ -280,7 +301,15 @@ export class PdfService {
         doc.font('Helvetica-Bold').fontSize(11).fillColor('#0F766E');
         doc.text(`${encounter.date} · ${encounter.service ?? 'Atendimento'}`);
         doc.font('Helvetica').fontSize(8).fillColor('#64748B');
-        doc.text(`${encounter.professional ?? 'Profissional não informado'} · ${encounter.status}`);
+        doc.text(
+          [
+            encounter.professional ?? 'Profissional não informado',
+            encounter.status,
+            encounter.weight ? `peso ${encounter.weight}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        );
         doc.moveDown(0.3);
 
         for (const section of encounter.sections) {
@@ -289,9 +318,21 @@ export class PdfService {
           doc.moveDown(0.3);
         }
 
-        if (encounter.diagnoses.length > 0) {
-          doc.font('Helvetica-Bold').fontSize(9).fillColor('#334155').text('Diagnósticos');
-          doc.font('Helvetica').fontSize(9).fillColor('#0F172A').text(encounter.diagnoses.join('; '));
+        const lists: Array<[string, string[]]> = [
+          ['Diagnósticos', encounter.diagnoses],
+          ['Procedimentos', encounter.procedures],
+          ['Receita', encounter.prescriptions],
+          ['Exames', encounter.exams],
+        ];
+        for (const [title, items] of lists) {
+          if (items.length === 0) continue;
+          doc.font('Helvetica-Bold').fontSize(9).fillColor('#334155').text(title);
+          doc.font('Helvetica').fontSize(9).fillColor('#0F172A');
+          for (const item of items) doc.text(`• ${item}`, { lineGap: 1 });
+          doc.moveDown(0.3);
+        }
+        if (encounter.followUp) {
+          doc.font('Helvetica').fontSize(9).fillColor('#334155').text(`Retorno indicado para ${encounter.followUp}.`);
         }
 
         doc.moveDown(0.6);

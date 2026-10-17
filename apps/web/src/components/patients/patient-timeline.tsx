@@ -43,6 +43,20 @@ const ICON: Record<string, typeof Activity> = {
   'patient.deceased': AlertTriangle,
 };
 
+const CLINICAL_KINDS: TimelineItem['kind'][] = [
+  'encounter.finished',
+  'diagnosis.final',
+  'prescription.signed',
+  'exam.ordered',
+  'exam.resulted',
+  'immunization.applied',
+  'preventive.applied',
+  'allergy.added',
+  'weight.recorded',
+  'document.attached',
+  'patient.deceased',
+];
+
 const ACCENT: Record<string, string> = {
   'encounter.finished': 'text-[var(--success)]',
   'prescription.signed': 'text-[var(--brand)]',
@@ -60,17 +74,22 @@ export function PatientTimeline({
   patientId,
   limit = 50,
   encounterOnly,
+  clinicalOnly,
 }: {
   patientId: string;
   limit?: number;
   encounterOnly?: string;
+  /** Só o que importa para decidir conduta: sem agendamento, início de atendimento e afins. */
+  clinicalOnly?: boolean;
 }) {
+  const kinds = clinicalOnly ? CLINICAL_KINDS.join(',') : undefined;
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['timeline', patientId, limit, encounterOnly],
+    queryKey: ['timeline', patientId, limit, encounterOnly, kinds ?? 'all'],
     queryFn: () =>
       api.get<{ items: TimelineItem[]; nextCursor: string | null }>(`/patients/${patientId}/timeline`, {
         limit,
         encounterId: encounterOnly,
+        kinds,
       }),
   });
 

@@ -4,20 +4,37 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CheckCircle2, ClipboardCheck, Send, TestTube } from 'lucide-react';
+import { CheckCircle2, ClipboardCheck, FileText, Send, TestTube, XCircle } from 'lucide-react';
 import type { ExamOrder, ExamOrderItem } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
+import { openDocument } from '@/lib/documents';
 import { formatDateTime, formatNumber } from '@/lib/format';
 import { ABNORMAL_FLAG, EXAM_ITEM_STATUS, EXAM_ORDER_STATUS, statusFor } from '@/lib/labels';
 import { useSession } from '@/lib/session';
 import { Badge } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
+import { Sheet } from '@/components/ui/sheet';
+import { Field, Textarea } from '@/components/ui/field';
 import { ExamResultSheet } from './exam-result-sheet';
 
-export function ExamOrderCard({ order, showPatient }: { order: ExamOrder; showPatient?: boolean }) {
+export function ExamOrderCard({
+  order,
+  showPatient,
+  hideHeader,
+}: {
+  order: ExamOrder;
+  showPatient?: boolean;
+  /** Dentro de uma linha que já mostra número, situação e data. */
+  hideHeader?: boolean;
+}) {
   const queryClient = useQueryClient();
   const { can } = useSession();
   const [resultTarget, setResultTarget] = useState<ExamOrderItem | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  // Pedido sem nenhum resultado ainda pode ser cancelado (pedido errado, tutor desistiu).
+  const canCancel =
+    can('exam_order:cancel') && !['resulted', 'reviewed', 'cancelled'].includes(order.status);
 
   const status = statusFor(EXAM_ORDER_STATUS, order.status);
 
@@ -40,10 +57,23 @@ export function ExamOrderCard({ order, showPatient }: { order: ExamOrder; showPa
     onError: (error) => toast.error(errorMessage(error)),
   });
 
+  const cancel = useMutation({
+    mutationFn: () => api.post(`/exam-orders/${order.id}/cancel`, { reason: cancelReason.trim() }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['exam-orders'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Pedido de exame cancelado.');
+      setCancelOpen(false);
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+
   return (
     <>
       <article className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
-        <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3.5 py-2.5">
+        <header
+          className={`flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3.5 py-2.5 ${hideHeader ? 'hidden' : ''}`}
+        >
           <span className="text-[13px] font-semibold text-[var(--ink)] tabular">Pedido nº {order.number}</span>
           <Badge tone={status.tone}>{status.label}</Badge>
           {order.priority !== 'routine' && (
@@ -120,6 +150,19 @@ export function ExamOrderCard({ order, showPatient }: { order: ExamOrder; showPa
                         {item.result.reportText}
                       </p>
                     )}
+                    {item.result.documentId && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="mt-2"
+                        onClick={() => {
+                          openDocument(item.result!.documentId!).catch((error) => toast.error(errorMessage(error)));
+                        }}
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Ver laudo
+                      </Button>
+                    )}
                     <p className="mt-1.5 text-[11.5px] text-[var(--ink-3)]">
                       Liberado em {formatDateTime(item.result.releasedAt)}
                       {item.result.releasedByName ? ` por ${item.result.releasedByName}` : ''}
@@ -151,9 +194,17 @@ export function ExamOrderCard({ order, showPatient }: { order: ExamOrder; showPa
                       Marcar como enviado
                     </Button>
                   )}
-                  {['requested', 'collected', 'sent', 'in_progress', 'resulted'].includes(item.status) &&
-                    can('exam_result:submit') && (
-                      <Button size="sm" onClick={() => setResultTarget(item)}>
+                  {/* Sem resultado ou preliminar: lança. Liberado ou já revisado: só
+                      quem pode retificar, e a versão anterior continua registrada. */}
+                  {item.status !== 'cancelled' &&
+                    (item.result && item.result.status !== 'preliminary'
+                      ? can('exam_result:amend')
+                      : can('exam_result:submit')) && (
+                      <Button
+                        size="sm"
+                        variant={item.result && item.result.status !== 'preliminary' ? 'ghost' : 'primary'}
+                        onClick={() => setResultTarget(item)}
+                      >
                         <ClipboardCheck className="h-3.5 w-3.5" />
                         {item.result ? 'Retificar resultado' : 'Lançar resultado'}
                       </Button>
@@ -169,9 +220,56 @@ export function ExamOrderCard({ order, showPatient }: { order: ExamOrder; showPa
             );
           })}
         </ul>
+
+        {canCancel && (
+          <div className="border-t border-[var(--border)] px-3.5 py-2">
+            <Button size="sm" variant="ghost" onClick={() => setCancelOpen(true)}>
+              <XCircle className="h-3.5 w-3.5" />
+              Cancelar pedido
+            </Button>
+          </div>
+        )}
       </article>
 
-      <ExamResultSheet item={resultTarget} onClose={() => setResultTarget(null)} />
+      <ExamResultSheet
+        item={resultTarget}
+        orderId={order.id}
+        patientId={order.patient.id}
+        onClose={() => setResultTarget(null)}
+      />
+
+      <Sheet
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        title="Cancelar pedido de exame"
+        description={`Pedido nº ${order.number} · ${order.items.map((entry) => entry.examName).join(', ')}`}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setCancelOpen(false)} className="sm:w-auto">
+              Voltar
+            </Button>
+            <Button
+              variant="danger"
+              disabled={cancelReason.trim().length < 3}
+              loading={cancel.isPending}
+              onClick={() => cancel.mutate()}
+              className="sm:w-auto"
+            >
+              Cancelar pedido
+            </Button>
+          </>
+        }
+      >
+        <Field label="Motivo" required hint="Fica no histórico do paciente e na auditoria.">
+          <Textarea
+            value={cancelReason}
+            onChange={(event) => setCancelReason(event.target.value)}
+            rows={2}
+            placeholder="Ex.: pedido em duplicidade"
+          />
+        </Field>
+      </Sheet>
     </>
   );
 }

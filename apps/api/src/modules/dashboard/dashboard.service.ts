@@ -155,10 +155,11 @@ export class DashboardService {
       const m = metricsResult.rows[0];
 
       const unsignedResult = await tx.query<{ count: string }>(
+        // Mesmo critério da lista "Abertos há mais de 1 dia" em /atendimentos.
         `SELECT count(*)::text AS count
-           FROM clinical.encounter_notes n
-          WHERE n.tenant_id = $1 AND n.status = 'draft'
-            AND n.created_at < now() - INTERVAL '1 day'`,
+           FROM clinical.encounters e
+          WHERE e.tenant_id = $1 AND e.status IN ('arrived','triaged','in_progress','on_hold')
+            AND e.created_at < now() - INTERVAL '1 day'`,
         [ctx.tenantId],
       );
 
@@ -229,7 +230,7 @@ export class DashboardService {
       if (unsigned > 0) {
         alerts.push({
           kind: 'unsigned_encounters',
-          label: 'Notas em rascunho há mais de um dia',
+          label: 'Atendimentos abertos há mais de um dia',
           count: unsigned,
           href: '/atendimentos?rascunhos=1',
         });

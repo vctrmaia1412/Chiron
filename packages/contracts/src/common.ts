@@ -1,5 +1,55 @@
 import { z } from 'zod';
 
+const FORMAT_MESSAGE: Record<string, string> = {
+  email: 'E-mail inválido.',
+  uuid: 'Identificador inválido.',
+  datetime: 'Data e hora inválidas.',
+  date: 'Data inválida.',
+  time: 'Hora inválida.',
+  url: 'Endereço inválido.',
+};
+
+/**
+ * Mensagens de validação em português do Brasil, curtas e no tom da tela.
+ * A mensagem escrita no próprio schema continua valendo; este mapa cobre o
+ * resto, para nenhum "Too small: expected string to have >=3 characters"
+ * chegar ao veterinário. Vale na API e no navegador, que importam daqui.
+ */
+export function brazilianErrorMessage(issue: z.core.$ZodRawIssue): string | undefined {
+  switch (issue.code) {
+    case 'invalid_type':
+      return issue.input === undefined || issue.input === null ? 'Campo obrigatório.' : 'Valor em formato inválido.';
+    case 'too_small': {
+      const min = Number(issue.minimum);
+      if (issue.origin === 'string') return min <= 1 ? 'Campo obrigatório.' : `Use pelo menos ${min} caracteres.`;
+      if (issue.origin === 'array' || issue.origin === 'set') return `Escolha pelo menos ${min}.`;
+      return issue.inclusive === false ? `Deve ser maior que ${min}.` : `Deve ser no mínimo ${min}.`;
+    }
+    case 'too_big': {
+      const max = Number(issue.maximum);
+      if (issue.origin === 'string') return `Use no máximo ${max} caracteres.`;
+      if (issue.origin === 'array' || issue.origin === 'set') return `No máximo ${max} itens.`;
+      return issue.inclusive === false ? `Deve ser menor que ${max}.` : `Deve ser no máximo ${max}.`;
+    }
+    case 'invalid_format':
+      return FORMAT_MESSAGE[issue.format] ?? 'Formato inválido.';
+    case 'invalid_value':
+      return 'Opção inválida.';
+    case 'not_multiple_of':
+      return 'Valor fora do passo permitido.';
+    case 'unrecognized_keys':
+      return 'Há campos não reconhecidos.';
+    case 'invalid_union':
+    case 'invalid_key':
+    case 'invalid_element':
+      return 'Valor inválido.';
+    default:
+      return undefined;
+  }
+}
+
+z.config({ customError: brazilianErrorMessage });
+
 export const uuidSchema = z.string().uuid();
 export const isoDateTimeSchema = z.string().datetime({ offset: true });
 /** Data civil (nascimento, validade): sem fuso. */
@@ -73,6 +123,56 @@ export const documentNumberSchema = z
   .trim()
   .transform((v) => v.replace(/\D/g, ''))
   .refine((v) => v.length === 11 || v.length === 14, 'CPF deve ter 11 dígitos e CNPJ 14');
+
+function checkDigit(digits: number[], weights: number[]): number {
+  const sum = digits.reduce((total, digit, index) => total + digit * weights[index]!, 0);
+  const rest = sum % 11;
+  return rest < 2 ? 0 : 11 - rest;
+}
+
+/** CPF com dígitos verificadores corretos (aceita com ou sem máscara). */
+export function isValidCpf(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length !== 11 || /^(\d)\1{10}$/.test(digits)) return false;
+  const numbers = [...digits].map(Number);
+  const first = checkDigit(numbers.slice(0, 9), [10, 9, 8, 7, 6, 5, 4, 3, 2]);
+  const second = checkDigit(numbers.slice(0, 10), [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]);
+  return first === numbers[9] && second === numbers[10];
+}
+
+/** CNPJ com dígitos verificadores corretos (aceita com ou sem máscara). */
+export function isValidCnpj(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length !== 14 || /^(\d)\1{13}$/.test(digits)) return false;
+  const numbers = [...digits].map(Number);
+  const first = checkDigit(numbers.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  const second = checkDigit(numbers.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  return first === numbers[12] && second === numbers[13];
+}
+
+export type IdentityDocumentKind = 'cpf' | 'cnpj' | 'passport' | 'none';
+
+/**
+ * Normaliza o documento conforme o tipo: CPF e CNPJ ficam só com dígitos,
+ * passaporte mantém letras (em maiúsculas). Devolve a mensagem de erro em
+ * português quando não confere, ou o valor normalizado.
+ */
+export function normalizeDocument(kind: IdentityDocumentKind, value: string): { value: string } | { error: string } {
+  const raw = value.trim();
+  if (kind === 'cpf') {
+    return isValidCpf(raw) ? { value: raw.replace(/\D/g, '') } : { error: 'CPF inválido. Confira os 11 dígitos.' };
+  }
+  if (kind === 'cnpj') {
+    return isValidCnpj(raw) ? { value: raw.replace(/\D/g, '') } : { error: 'CNPJ inválido. Confira os 14 dígitos.' };
+  }
+  if (kind === 'passport') {
+    const compact = raw.replace(/[\s.-]/g, '').toUpperCase();
+    return /^[A-Z0-9]{5,20}$/.test(compact)
+      ? { value: compact }
+      : { error: 'Passaporte deve ter de 5 a 20 letras ou números.' };
+  }
+  return { error: 'Escolha o tipo de documento antes de informar o número.' };
+}
 
 export const addressSchema = z.object({
   zipCode: z.string().trim().max(12).optional(),

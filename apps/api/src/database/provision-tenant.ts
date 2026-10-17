@@ -100,6 +100,7 @@ async function main(): Promise<void> {
     planKey: required(flags, 'plano'),
     timezone: optional(flags, 'timezone'),
     status: flags.has('ativo') ? ('active' as const) : ('trial' as const),
+    starterCatalog: true,
     facility: {
       name: optional(flags, 'unidade') ?? 'Unidade principal',
       code: optional(flags, 'codigo-unidade') ?? 'MTZ',

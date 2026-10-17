@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { ClientBase } from 'pg';
+import type { SignupRequest } from '@chiron/contracts';
 import { DatabaseService } from '../../database/database.service';
+import { SessionService } from '../../auth/session.service';
+import { env } from '../../config/env';
 import { CryptoService } from '../../common/crypto.service';
 import { MailerService, invitationUrl } from '../../common/mailer.service';
 import { AppError } from '../../common/errors';
@@ -54,7 +57,26 @@ export interface ProvisionTenantInput {
   settings?: Record<string, unknown>;
   facility: ProvisionFacilityInput;
   owner: ProvisionOwnerInput;
+  /**
+   * Serviços básicos e laboratório interno. Clínica de verdade nasce com eles:
+   * sem nenhum serviço, a agenda não marca nada. O seed de demonstração deixa
+   * desligado porque monta o próprio catálogo, com preços.
+   */
+  starterCatalog?: boolean;
 }
+
+/** O que quase toda clínica faz. Sem preço: cada clínica põe o seu em Configurações. */
+export const STARTER_SERVICES = [
+  { key: 'consulta', name: 'Consulta clínica', category: 'consultation', minutes: 30 },
+  { key: 'retorno', name: 'Retorno', category: 'return', minutes: 20 },
+  { key: 'vacinacao', name: 'Vacinação', category: 'vaccination', minutes: 15 },
+  { key: 'emergencia', name: 'Atendimento de urgência', category: 'consultation', minutes: 45 },
+  { key: 'coleta-exames', name: 'Coleta de exames', category: 'exam', minutes: 15 },
+  { key: 'exame-imagem', name: 'Exame de imagem', category: 'exam', minutes: 30 },
+  { key: 'procedimento', name: 'Procedimento ambulatorial', category: 'procedure', minutes: 45 },
+  { key: 'cirurgia', name: 'Cirurgia', category: 'surgery', minutes: 120 },
+  { key: 'teleorientacao', name: 'Teleorientação', category: 'telehealth', minutes: 25 },
+] as const;
 
 export interface ProvisionTenantResult {
   tenantId: string;
@@ -218,6 +240,22 @@ export async function provisionTenant(
     );
   }
 
+  if (input.starterCatalog) {
+    for (const service of STARTER_SERVICES) {
+      await tx.query(
+        `INSERT INTO registry.service_catalog
+           (id, tenant_id, key, name, category, default_duration_min, default_price, requires_professional, active)
+         VALUES ($1,$2,$3,$4,$5,$6,NULL,true,true)`,
+        [uuidv7(), tenantId, service.key, service.name, service.category, service.minutes],
+      );
+    }
+    await tx.query(
+      `INSERT INTO lab.laboratories (id, tenant_id, name, is_internal, active)
+       VALUES ($1,$2,'Laboratório interno',true,true)`,
+      [uuidv7(), tenantId],
+    );
+  }
+
   // Sem ator humano: a criação vem de linha de comando ou de rotina interna.
   // O registro não leva dado pessoal, só o que identifica a organização.
   await tx.query(
@@ -230,13 +268,124 @@ export async function provisionTenant(
   return { tenantId, facilityId, ownerUserId, membershipId, professionalId, invitationToken };
 }
 
+/** "Clínica São Francisco" vira "clinica-sao-francisco-k3f9": legível e sem colisão. */
+function signupSlug(name: string): string {
+  const base =
+    name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40)
+      .replace(/-+$/g, '') || 'clinica';
+  return `${base}-${Math.random().toString(36).slice(2, 6).padEnd(4, '0')}`;
+}
+
 @Injectable()
 export class ProvisioningService {
   constructor(
     private readonly db: DatabaseService,
     private readonly crypto: CryptoService,
     private readonly mailer: MailerService,
+    private readonly sessions: SessionService,
   ) {}
+
+  /**
+   * Cadastro aberto: a pessoa cria a conta e a própria clínica, já com o
+   * catálogo inicial, e entra em seguida (quem chama abre a sessão). Nasce em
+   * avaliação no plano Clínica.
+   *
+   * E-mail que já existe é recusado mesmo sem senha: é o dono provisionado
+   * que ainda não aceitou o convite, e definir a senha por aqui entregaria a
+   * clínica dele a quem soubesse o endereço.
+   */
+  async signup(input: SignupRequest, meta: { ip: string | null }): Promise<{ tenantId: string; email: string }> {
+    const cfg = env();
+    if (!cfg.SIGNUP_ENABLED) {
+      throw AppError.forbidden('O cadastro está fechado. Peça um convite a quem administra a clínica.');
+    }
+    // campo invisível preenchido: robô
+    if (input.website) throw AppError.validation('Não foi possível criar a conta.');
+
+    const email = input.email.trim().toLowerCase();
+    const existing = await this.db.withAdmin((tx) =>
+      tx.query(`SELECT 1 FROM iam.users WHERE email = $1 AND deleted_at IS NULL`, [email]),
+    );
+    if (existing.rows.length > 0) {
+      throw AppError.conflict(
+        'Já existe uma conta com este e-mail. Entre com sua senha, use "Esqueci minha senha" ou o link do convite que recebeu.',
+        { reason: 'email_taken', issues: [{ path: 'email', message: 'Este e-mail já tem conta.' }] },
+      );
+    }
+
+    if (meta.ip) {
+      const recent = await this.db.withAdmin((tx) =>
+        tx.query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM audit.audit_log
+            WHERE action = 'tenant.signup' AND ip = $1 AND occurred_at > now() - interval '1 hour'`,
+          [meta.ip],
+        ),
+      );
+      if (Number(recent.rows[0]?.count ?? 0) >= cfg.SIGNUP_PER_IP_PER_HOUR) {
+        throw new AppError('RATE_LIMITED', 'Muitas clínicas criadas a partir desta rede. Tente de novo em uma hora.');
+      }
+    }
+
+    // argon2id fora da transação: segura a conexão administrativa só o necessário
+    const passwordHash = await this.sessions.hashPassword(input.password);
+    const clinicName = input.clinicName.trim();
+    const address = input.city || input.state ? { city: input.city || undefined, state: input.state } : null;
+
+    const result = await this.db.withAdmin(async (tx) => {
+      let slug = signupSlug(clinicName);
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const taken = await tx.query(`SELECT 1 FROM platform.tenants WHERE slug = $1`, [slug]);
+        if (taken.rows.length === 0) break;
+        slug = signupSlug(clinicName);
+      }
+
+      const provisioned = await provisionTenant(
+        tx,
+        {
+          slug,
+          name: clinicName,
+          planKey: 'clinic',
+          status: 'trial',
+          settings: { origin: 'signup' },
+          starterCatalog: true,
+          facility: { name: clinicName, code: 'MTZ', address },
+          owner: {
+            email,
+            name: input.name.trim(),
+            council: input.isVeterinarian ? 'CRMV' : null,
+            councilNumber: input.isVeterinarian ? (input.councilNumber ?? null) : null,
+            councilState: input.isVeterinarian ? (input.councilState ?? null) : null,
+            passwordHash,
+          },
+        },
+        this.crypto,
+      );
+
+      // O IP fica para o freio de cadastros por hora; nenhum dado pessoal no registro.
+      await tx.query(
+        `INSERT INTO audit.audit_log
+           (id, tenant_id, actor_user_id, actor_type, category, action, entity_schema, entity_table, entity_id, ip, after)
+         VALUES ($1,$2,$3,'user','mutation','tenant.signup','platform','tenants',$2,$4,$5)`,
+        [
+          uuidv7(),
+          provisioned.tenantId,
+          provisioned.ownerUserId,
+          meta.ip,
+          JSON.stringify({ slug, isVeterinarian: input.isVeterinarian }),
+        ],
+      );
+      return provisioned;
+    });
+
+    logger.info({ tenantId: result.tenantId }, 'Clínica criada pelo cadastro aberto');
+    return { tenantId: result.tenantId, email };
+  }
 
   /**
    * `platform.tenants` tem RLS forçada e nenhuma política de INSERT: o papel da

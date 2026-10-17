@@ -76,6 +76,46 @@ export function computeDose(input: DoseInput): DoseResult {
   };
 }
 
+const DOSE_UOM_ALIASES: Record<string, { uom: DoseUom; perKg: boolean }> = {
+  mg: { uom: 'mg', perKg: false },
+  'mg/kg': { uom: 'mg', perKg: true },
+  ml: { uom: 'ml', perKg: false },
+  'ml/kg': { uom: 'ml', perKg: true },
+  g: { uom: 'g', perKg: false },
+  ui: { uom: 'ui', perKg: false },
+  'ui/kg': { uom: 'ui', perKg: true },
+  tablet: { uom: 'tablet', perKg: false },
+  comprimido: { uom: 'tablet', perKg: false },
+  comp: { uom: 'tablet', perKg: false },
+  capsule: { uom: 'capsule', perKg: false },
+  capsula: { uom: 'capsule', perKg: false },
+  drop: { uom: 'drop', perKg: false },
+  gota: { uom: 'drop', perKg: false },
+  gotas: { uom: 'drop', perKg: false },
+  sachet: { uom: 'sachet', perKg: false },
+  sache: { uom: 'sachet', perKg: false },
+  application: { uom: 'application', perKg: false },
+  aplicacao: { uom: 'application', perKg: false },
+  seringa: { uom: 'application', perKg: false },
+  bisnaga: { uom: 'application', perKg: false },
+};
+
+/**
+ * Unidade de dose gravada por versões antigas ou por importação ("mg/kg",
+ * "comprimido", "mL") traduzida para o vocabulário fechado da receita. Devolve
+ * nula quando não reconhece, para a tela pedir a unidade em vez de inventar.
+ */
+export function parseDoseUom(raw: string | null | undefined): { uom: DoseUom | null; perKg: boolean } {
+  if (!raw) return { uom: null, perKg: false };
+  const key = raw
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/\.$/, '');
+  return DOSE_UOM_ALIASES[key] ?? { uom: null, perKg: false };
+}
+
 export function doseUnitLabel(uom: DoseUom): string {
   const labels: Record<DoseUom, string> = {
     mg: 'mg',

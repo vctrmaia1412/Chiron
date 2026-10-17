@@ -215,8 +215,8 @@ export const PERMISSIONS = [
   // -------------------------------------------------------- immunization
   p('immunization', 'immunization:read', 'Ver vacinas e preventivos'),
   p('immunization', 'immunization:apply', 'Aplicar vacina'),
-  p('immunization', 'immunization:update', 'Editar registro de vacina'),
-  p('immunization', 'immunization:cancel', 'Cancelar registro de vacina'),
+  p('immunization', 'immunization:update', 'Corrigir registro de vacina ou preventivo'),
+  p('immunization', 'immunization:cancel', 'Cancelar registro de vacina ou preventivo'),
   p('immunization', 'preventive:record', 'Registrar vermífugo ou antiparasitário'),
   p('immunization', 'protocol:manage', 'Gerenciar protocolos vacinais'),
 
@@ -304,8 +304,15 @@ export interface RoleTemplate {
   key: string;
   name: string;
   description: string;
-  /** `true` quando o papel exige registro profissional válido para assinar. */
+  /** `true` quando o papel atua no fluxo clínico (triagem, prontuário, vacina). */
   clinical: boolean;
+  /**
+   * `true` quando o papel só funciona com registro em conselho (CRMV), porque
+   * assina prontuário e receita. Não se confunde com `clinical`: o técnico
+   * atua no fluxo clínico mas não assina, e convidá-lo não pode pedir CRMV.
+   * É daqui que sai `iam.roles.requires_license`.
+   */
+  requiresLicense: boolean;
   permissions: PermissionKey[];
   sort: number;
 }
@@ -321,6 +328,7 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Proprietário',
     description: 'Acesso total, incluindo plano, cobrança e transferência de titularidade.',
     clinical: false,
+    requiresLicense: false,
     permissions: ALL.filter((k) => !OWNER_EXCLUDED.includes(k)),
     sort: 10,
   },
@@ -329,6 +337,7 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Administrador',
     description: 'Gestão completa da operação, exceto plano e cobrança.',
     clinical: false,
+    requiresLicense: false,
     permissions: ALL.filter((k) => !ADMIN_EXCLUDED.includes(k)),
     sort: 20,
   },
@@ -337,6 +346,7 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Veterinário',
     description: 'Fluxo clínico completo, agenda e cadastro.',
     clinical: true,
+    requiresLicense: true,
     permissions: [
       'tenant:read',
       'facility:read',
@@ -380,6 +390,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
       'exam:collect',
       'exam_result:submit',
       'exam_result:sign',
+      // laudo que chega corrigido do laboratório: quem atende retifica, a versão anterior fica
+      'exam_result:amend',
       'immunization:read',
       'immunization:apply',
       'immunization:update',
@@ -403,6 +415,7 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Técnico / Enfermagem',
     description: 'Triagem, sinais vitais, evolução e apoio clínico. Não assina prontuário.',
     clinical: true,
+    requiresLicense: false,
     permissions: [
       'tenant:read',
       'facility:read',
@@ -444,6 +457,7 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Recepção',
     description: 'Cadastro, agenda, check-in com pesagem e check-out. Sem prontuário clínico.',
     clinical: false,
+    requiresLicense: false,
     permissions: [
       'tenant:read',
       'facility:read',
@@ -479,6 +493,7 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Financeiro',
     description: 'Faturamento, recebimentos e relatórios financeiros.',
     clinical: false,
+    requiresLicense: false,
     permissions: [
       'tenant:read',
       'facility:read',
@@ -506,6 +521,7 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Estoque',
     description: 'Produtos, lotes, movimentações e contagem.',
     clinical: false,
+    requiresLicense: false,
     permissions: [
       'tenant:read',
       'facility:read',
@@ -532,6 +548,7 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Somente leitura',
     description: 'Consulta sem escrita e sem conteúdo clínico sensível.',
     clinical: false,
+    requiresLicense: false,
     permissions: [
       'tenant:read',
       'facility:read',
@@ -557,8 +574,11 @@ export const ROLE_TEMPLATE_BY_KEY: Record<string, RoleTemplate> = Object.fromEnt
   ROLE_TEMPLATES.map((r) => [r.key, r]),
 );
 
-/** Papéis que exigem vínculo com profissional para atuar clinicamente. */
+/** Papéis que atuam no fluxo clínico. Não diz quem precisa de CRMV: isso é `LICENSED_ROLE_KEYS`. */
 export const CLINICAL_ROLE_KEYS = ROLE_TEMPLATES.filter((r) => r.clinical).map((r) => r.key);
+
+/** Papéis que só podem ser concedidos com registro em conselho (número e UF do CRMV). */
+export const LICENSED_ROLE_KEYS = ROLE_TEMPLATES.filter((r) => r.requiresLicense).map((r) => r.key);
 
 /** Permissões cuja concessão só tem efeito com registro em conselho válido. */
 export const LICENSE_REQUIRED_PERMISSIONS = [

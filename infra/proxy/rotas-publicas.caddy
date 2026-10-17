@@ -1,0 +1,51 @@
+# Rotas do CHIRON compartilhadas pelos sites públicos (Caddyfile.publico e
+# Caddyfile.demo). É importado de dentro de um bloco de site e não funciona
+# sozinho. A pilha local (Caddyfile, porta 8080) continua com a cópia própria.
+#
+# Web, API e arquivos ficam na mesma origem: o cookie de sessão é same-origin,
+# o navegador não precisa de CORS e o upload direto para o storage também não.
+
+encode zstd gzip
+
+header {
+	X-Content-Type-Options nosniff
+	Referrer-Policy strict-origin-when-cross-origin
+	X-Frame-Options DENY
+	Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
+	-Server
+}
+
+# Health do proxy, independente dos serviços atrás dele (monitor externo).
+handle /healthz {
+	respond "ok" 200
+}
+
+handle /api/* {
+	# X-Forwarded-For e X-Forwarded-Proto o Caddy já envia por padrão.
+	reverse_proxy api:3333 {
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+# Documentos: a API devolve URL assinada (SigV4) com S3_PUBLIC_ENDPOINT igual à
+# origem pública e estilo de caminho, então o navegador fala com
+# https://<dominio>/<bucket>/<chave>?X-Amz-... e o Caddy entrega ao MinIO com
+# o mesmo Host, que é o que a assinatura cobre. Só o caminho do bucket é
+# exposto; o resto da API do MinIO (console, admin) não passa por aqui.
+# A URL assinada já carrega a autenticação: o cabeçalho Authorization (por
+# exemplo, o Basic do ambiente de demonstração) sai antes de chegar ao MinIO,
+# que recusaria dois mecanismos de autenticação na mesma requisição.
+handle /{$S3_BUCKET:chiron}/* {
+	reverse_proxy minio:9000 {
+		header_up -Authorization
+	}
+}
+
+handle {
+	reverse_proxy web:3000
+}
+
+log {
+	output stdout
+	format json
+}

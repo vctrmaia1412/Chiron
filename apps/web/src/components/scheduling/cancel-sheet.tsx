@@ -29,6 +29,9 @@ function CancelAppointmentSheetContent({
   const [reason, setReason] = useState(REASONS[0]!);
   const [detail, setDetail] = useState('');
   const [markNoShow, setMarkNoShow] = useState(false);
+  // Depois do check-in o paciente veio: falta não se aplica, e o atendimento
+  // aberto na chegada é cancelado junto.
+  const arrived = appointment ? ['checked_in', 'in_service'].includes(appointment.status) : false;
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -41,6 +44,7 @@ function CancelAppointmentSheetContent({
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      await queryClient.invalidateQueries({ queryKey: ['encounters'] });
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success(markNoShow ? 'Falta registrada.' : 'Agendamento cancelado.');
       onClose();
@@ -88,15 +92,21 @@ function CancelAppointmentSheetContent({
           <Textarea value={detail} onChange={(event) => setDetail(event.target.value)} rows={2} />
         </Field>
 
-        <label className="flex items-center gap-2 text-[13.5px] text-[var(--ink-2)]">
-          <input
-            type="checkbox"
-            checked={markNoShow}
-            onChange={(event) => setMarkNoShow(event.target.checked)}
-            className="h-4 w-4 accent-[var(--brand)]"
-          />
-          O tutor não compareceu (registrar como falta)
-        </label>
+        {arrived ? (
+          <p className="rounded-[var(--radius)] bg-[var(--warning-soft)] px-3 py-2 text-[12.5px] text-[var(--warning)]">
+            O paciente já fez check-in: o atendimento aberto na chegada também será cancelado.
+          </p>
+        ) : (
+          <label className="flex items-center gap-2 text-[13.5px] text-[var(--ink-2)]">
+            <input
+              type="checkbox"
+              checked={markNoShow}
+              onChange={(event) => setMarkNoShow(event.target.checked)}
+              className="h-4 w-4 accent-[var(--brand)]"
+            />
+            O tutor não compareceu (registrar como falta)
+          </label>
+        )}
 
         <p className="rounded-[var(--radius)] bg-[var(--surface-2)] px-3 py-2 text-[12.5px] text-[var(--ink-3)]">
           O agendamento não é apagado: fica no histórico com o motivo e o autor da ação.

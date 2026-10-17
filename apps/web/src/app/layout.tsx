@@ -13,6 +13,9 @@ export const metadata: Metadata = {
   description: 'Prontuário, agenda e gestão clínica veterinária.',
   applicationName: 'CHIRON',
   formatDetection: { telephone: false },
+  // iPhone ignora o manifesto para o ícone da tela inicial e pede PNG próprio.
+  icons: { apple: '/apple-touch-icon.png' },
+  appleWebApp: { capable: true, title: 'CHIRON', statusBarStyle: 'default' },
 };
 
 export const viewport: Viewport = {

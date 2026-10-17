@@ -1,0 +1,33 @@
+# Proxy do ambiente de DEMONSTRAÇÃO, com HTTPS automático e senha na porta.
+#
+# Igual ao Caddyfile.publico, mais uma senha HTTP Basic na frente de tudo
+# (menos /healthz). Motivo: o seed de demonstração cria usuários com e-mails
+# previsíveis e a mesma senha para todos, publicada no README. Sem esta
+# barreira, qualquer pessoa que achar a URL entra como veterinário.
+#
+# Selecionado com PROXY_CADDYFILE=Caddyfile.demo no .env.stack (o
+# infra/scripts/gerar-env.sh --demo já escreve assim).
+#
+# Variáveis além das do Caddyfile.publico:
+#   DEMO_USUARIO     usuário da senha de porta (padrão: demo)
+#   DEMO_SENHA_HASH  hash bcrypt gerado por `caddy hash-password`. Vazio, o
+#                    Caddy não sobe: melhor fora do ar do que aberto.
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+
+{$CHIRON_DOMAIN} {
+	header Strict-Transport-Security "max-age=31536000"
+
+	@protegido not path /healthz
+	basic_auth @protegido {
+		{$DEMO_USUARIO:demo} {$DEMO_SENHA_HASH}
+	}
+
+	import /etc/caddy/chiron/rotas-publicas.caddy
+}
+
+http://:8080 {
+	import /etc/caddy/chiron/rotas-publicas.caddy
+}

@@ -123,4 +123,6 @@ export const listExamOrdersQuerySchema = paginationQuerySchema.extend({
   patientId: uuidSchema.optional(),
   encounterId: uuidSchema.optional(),
   pending: queryBoolean.optional(),
+  /** Parte do nome do paciente. */
+  q: z.string().trim().max(80).optional(),
 });

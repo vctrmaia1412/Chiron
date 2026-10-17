@@ -27,6 +27,7 @@ import { AppError } from '../../common/errors';
 import { uuidv7 } from '../../common/uuid';
 import type { RequestContext } from '../../common/request-context';
 import { contextToTenantContext, facilityScope } from '../../common/request-context';
+import { upsertProblemInTx } from './problems';
 
 const ENCOUNTER_SELECT = `
   e.id, e.number::text AS number, e.facility_id, e.class, e.status, e.appointment_id,
@@ -123,6 +124,7 @@ export class EncountersService {
       class: row.class as EncounterSummary['class'],
       status: row.status as EncounterSummary['status'],
       serviceName: row.service_name,
+      serviceCategory: row.service_category,
       attendingProfessional: row.professional_id
         ? { id: row.professional_id, name: row.professional_name ?? '' }
         : null,
@@ -152,6 +154,11 @@ export class EncountersService {
             AND ($8::boolean IS NOT TRUE OR e.status IN ('arrived','triaged','in_progress','on_hold'))
             AND ($9::text IS NULL OR p.name ILIKE '%' || $9 || '%')
             AND ($10::uuid[] IS NULL OR e.facility_id = ANY($10))
+            AND ($12::text IS NULL
+              OR ($12 = 'waiting' AND e.status IN ('arrived','triaged'))
+              OR ($12 = 'active' AND e.status IN ('in_progress','on_hold'))
+              OR ($12 = 'stale' AND e.status IN ('arrived','triaged','in_progress','on_hold')
+                  AND e.created_at < now() - INTERVAL '1 day'))
           ORDER BY e.created_at DESC
           LIMIT $11`,
         [
@@ -166,6 +173,7 @@ export class EncountersService {
           params.q ?? null,
           scope,
           params.limit,
+          params.stage ?? null,
         ],
       );
       return { items: rows.map((r) => this.toSummary(r)), nextCursor: null };
@@ -329,7 +337,7 @@ export class EncountersService {
           input.appointmentId ?? null,
           input.serviceId ?? null,
           input.class,
-          input.attendingProfessionalId ?? ctx.professionalId,
+          input.attendingProfessionalId ?? (ctx.permissions.has('encounter:sign') ? ctx.professionalId : null),
           input.chiefComplaint ?? null,
           input.followUpOfEncounterId ?? null,
           ctx.user.id,
@@ -342,6 +350,15 @@ export class EncountersService {
             WHERE id = $1 AND tenant_id = $2 AND encounter_id IS NULL`,
           [input.appointmentId, ctx.tenantId, encounterId],
         );
+      }
+
+      // A queixa contada na recepção já é o começo do registro: o veterinário
+      // encontra a seção preenchida e só completa, em vez de perguntar de novo.
+      if (input.chiefComplaint) {
+        await this.upsertNoteInTx(tx, ctx, encounterId, input.patientId, {
+          kind: 'chief_complaint',
+          body: input.chiefComplaint,
+        });
       }
 
       await this.audit.record(tx, ctx, {
@@ -377,12 +394,14 @@ export class EncountersService {
                 cancel_reason = CASE WHEN $3 = 'cancelled' THEN $4 ELSE cancel_reason END,
                 ended_at = CASE WHEN $3 = 'cancelled' THEN now() ELSE ended_at END,
                 attending_professional_id = CASE
-                  WHEN $3 = 'in_progress' AND attending_professional_id IS NULL THEN $5
+                  WHEN $3 = 'in_progress' AND attending_professional_id IS NULL AND $7 THEN $5
                   ELSE attending_professional_id END,
                 row_version = row_version + 1,
                 updated_by = $6
           WHERE id = $1 AND tenant_id = $2`,
-        [id, ctx.tenantId, to, reason ?? null, ctx.professionalId, ctx.user.id],
+        // Só quem assina vira responsável: o técnico que adianta a triagem não
+        // "pega" o atendimento do veterinário.
+        [id, ctx.tenantId, to, reason ?? null, ctx.professionalId, ctx.user.id, ctx.permissions.has('encounter:sign')],
       );
 
       // agenda acompanha o atendimento
@@ -420,6 +439,50 @@ export class EncountersService {
           payload: { patientId: current.patient_id },
         });
       }
+    });
+
+    return this.get(ctx, id);
+  }
+
+  /**
+   * Assumir o atendimento: o veterinário que cobre o plantão passa a ser o
+   * responsável e pode finalizar. Fica na auditoria quem era antes.
+   */
+  async assume(ctx: RequestContext, id: string): Promise<EncounterDetail> {
+    if (!ctx.professionalId) {
+      throw AppError.forbidden('Seu usuário não está vinculado a um profissional da clínica.');
+    }
+    await this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
+      const current = await this.lockEncounter(tx, ctx, id);
+      assertEncounterWritable(current.status as EncounterStatus);
+      if (current.attending_professional_id === ctx.professionalId) return;
+
+      await tx.query(
+        `UPDATE clinical.encounters
+            SET attending_professional_id = $3, row_version = row_version + 1, updated_by = $4
+          WHERE id = $1 AND tenant_id = $2`,
+        [id, ctx.tenantId, ctx.professionalId, ctx.user.id],
+      );
+      if (current.appointment_id) {
+        await tx.query(
+          // O paciente já está na clínica: o horário do novo responsável pode
+          // coincidir com outro agendamento dele, e isso não deve travar.
+          `UPDATE scheduling.appointments
+              SET professional_id = $3, allow_overlap = true, row_version = row_version + 1
+            WHERE id = $1 AND tenant_id = $2 AND status IN ('checked_in','in_service')`,
+          [current.appointment_id, ctx.tenantId, ctx.professionalId],
+        );
+      }
+
+      await this.audit.record(tx, ctx, {
+        category: 'mutation',
+        action: 'encounter.reassign',
+        entitySchema: 'clinical',
+        entityTable: 'encounters',
+        entityId: id,
+        before: { attendingProfessionalId: current.attending_professional_id },
+        after: { attendingProfessionalId: ctx.professionalId },
+      });
     });
 
     return this.get(ctx, id);
@@ -816,6 +879,23 @@ export class EncountersService {
         entityTable: 'encounter_diagnoses',
         entityId: diagnosisId,
       });
+
+      if (input.addToProblems === 'active' || input.addToProblems === 'chronic') {
+        const problem = await upsertProblemInTx(tx, ctx.tenantId as string, current.patient_id, {
+          description: String(input.description),
+          status: input.addToProblems,
+          conditionId: (input.conditionId as string | undefined) ?? null,
+          sourceEncounterId: id,
+        });
+        await this.audit.record(tx, ctx, {
+          category: 'mutation',
+          action: 'patient.problem.add',
+          entitySchema: 'registry',
+          entityTable: 'patient_problems',
+          entityId: problem.id,
+          after: { status: input.addToProblems, fromDiagnosis: diagnosisId },
+        });
+      }
     });
     return this.get(ctx, id);
   }
@@ -1186,7 +1266,7 @@ export class EncountersService {
           (SELECT count(*) FROM immunization.immunizations i WHERE i.tenant_id = $1 AND i.encounter_id = $2
              AND i.status = 'completed')
           + (SELECT count(*) FROM immunization.preventive_treatments pt
-              WHERE pt.tenant_id = $1 AND pt.encounter_id = $2)
+              WHERE pt.tenant_id = $1 AND pt.encounter_id = $2 AND pt.status = 'completed')
         )::text AS immunizations,
         (SELECT count(*) FROM lab.exam_orders o WHERE o.tenant_id = $1 AND o.encounter_id = $2
            AND o.status <> 'cancelled')::text AS exams,

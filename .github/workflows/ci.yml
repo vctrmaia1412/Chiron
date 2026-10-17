@@ -96,6 +96,12 @@ jobs:
       COLUMN_HASH_KEY: test-column-hash-key-com-32-caracteres
       # Erro da API visível no log do job sem afogar a saída do teste.
       TEST_LOG_LEVEL: error
+      # Storage de arquivos do passo "Subir armazenamento". A assinatura de
+      # receita grava o PDF; sem storage, três testes do fluxo clínico falhavam.
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: chiron_minio
+      S3_SECRET_KEY: chiron_dev_password
+      S3_BUCKET: chiron-test
 
     steps:
       - uses: actions/checkout@v5
@@ -116,6 +122,27 @@ jobs:
       - name: Compilar pacotes compartilhados
         run: pnpm exec turbo run build --filter=@chiron/contracts --filter=@chiron/domain
 
+      # Em passo próprio, e não em `services:`, porque serviço do Actions não
+      # aceita o comando `server /data`. Imagem da Chainguard: a minio/minio
+      # saiu do Docker Hub (ver infra/compose/docker-compose.publico.yml).
+      # O bucket é criado pela própria API no primeiro uso. Como root pelo
+      # mesmo motivo da sobreposição de produção: a imagem roda como 65532 e
+      # não consegue escrever em /data.
+      - name: Subir armazenamento de arquivos (MinIO)
+        run: |
+          docker run -d --name minio --user 0:0 -p 9000:9000 \
+            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/minio/health/ready >/dev/null; then
+              echo "MinIO pronto"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs minio
+          exit 1
+
       - name: Testes de integração
         run: pnpm test:integration
 
@@ -128,3 +155,123 @@ jobs:
           DATABASE_MIGRATION_URL: postgres://chiron_owner:chiron_dev_password@localhost:5432/chiron_test
           DATABASE_URL: postgres://chiron_app:chiron_dev_password@localhost:5432/chiron_test
         run: pnpm --filter @chiron/api exec tsx src/database/verify-rls.ts
+
+  # Jornadas reais no navegador (celular e computador) contra API e web
+  # compiladas como em produção, banco com o seed de demonstração e MinIO.
+  e2e:
+    name: Ponta a ponta
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chiron_owner
+          POSTGRES_PASSWORD: chiron_dev_password
+          POSTGRES_DB: chiron
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chiron_owner -d chiron"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      APP_ENV: dev
+      DATABASE_MIGRATION_URL: postgres://chiron_owner:chiron_dev_password@localhost:5432/chiron
+      DATABASE_URL: postgres://chiron_app:chiron_dev_password@localhost:5432/chiron
+      DATABASE_IAM_URL: postgres://chiron_iam:chiron_dev_password@localhost:5432/chiron
+      DATABASE_ADMIN_URL: postgres://chiron_admin:chiron_dev_password@localhost:5432/chiron
+      DATABASE_ROLE_PASSWORD: chiron_dev_password
+      SESSION_SECRET: e2e-session-secret-com-mais-de-32-caracteres
+      COLUMN_ENCRYPTION_KEY: e2e-column-encryption-key-32-chars-min
+      COLUMN_HASH_KEY: e2e-column-hash-key-com-32-caracteres
+      S3_ENDPOINT: http://localhost:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: chiron_minio
+      S3_SECRET_KEY: chiron_dev_password
+      S3_BUCKET: chiron-e2e
+      PUBLIC_APP_URL: http://localhost:3000
+      # A suíte entra com cada papel no começo e testa o login: o limite de
+      # produção (10 por minuto) derrubaria a própria execução.
+      RATE_LIMIT_LOGIN_PER_MIN: '200'
+      LOG_LEVEL: warn
+      NEXT_PUBLIC_API_URL: http://localhost:3333/api/v1
+      # Mesmo fuso da clínica e do navegador dos testes: "hoje" na agenda é o
+      # dia de Brasília, e não o do relógio UTC do runner.
+      TZ: America/Sao_Paulo
+      E2E_BASE_URL: http://localhost:3000
+      E2E_API_URL: http://localhost:3333/api/v1
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Ativar pnpm pelo corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Subir armazenamento de arquivos (MinIO)
+        run: |
+          docker run -d --name minio --user 0:0 -p 9000:9000 \
+            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/minio/health/ready >/dev/null; then
+              echo "MinIO pronto"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs minio
+          exit 1
+
+      - name: Compilar
+        run: pnpm exec turbo run build --filter=@chiron/api --filter=@chiron/web
+
+      - name: Preparar banco (migrações e dados de demonstração)
+        run: |
+          pnpm --filter @chiron/api db:migrate
+          pnpm --filter @chiron/api db:seed
+
+      - name: Subir API e web
+        run: |
+          nohup pnpm --filter @chiron/api start > api.log 2>&1 &
+          nohup pnpm --filter @chiron/web start > web.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:3333/api/v1/health >/dev/null && curl -fsS -o /dev/null http://localhost:3000/entrar; then
+              echo "API e web prontas"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat api.log web.log
+          exit 1
+
+      - name: Instalar o Chromium do Playwright
+        run: pnpm --filter @chiron/e2e exec playwright install --with-deps chromium
+
+      - name: Testes ponta a ponta
+        run: pnpm --filter @chiron/e2e test:e2e
+
+      - name: Guardar relatório e logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-relatorio
+          path: |
+            apps/e2e/playwright-report
+            apps/e2e/test-results
+            api.log
+            web.log
+          retention-days: 7

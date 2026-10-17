@@ -20,7 +20,9 @@ const nextConfig: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
+          // Câmera para ler microchip e código de barras; microfone para o
+          // ditado do registro clínico. Os dois só para a própria origem.
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(self), geolocation=()' },
         ],
       },
     ];

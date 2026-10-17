@@ -111,6 +111,9 @@ estado vem da API. O navegador não guarda prontuário.
 - [`docs/PLANO_DE_LANCAMENTO.md`](docs/PLANO_DE_LANCAMENTO.md): o que falta
   para vender, como colocar no ar sem custo, até onde a pilha gratuita
   sustenta e como escalar. Fonte de verdade da próxima etapa.
+- [`docs/DEPLOY_GRATUITO.md`](docs/DEPLOY_GRATUITO.md): colocar no ar de graça
+  (Oracle Cloud Always Free, domínio DuckDNS, HTTPS automático e backup fora
+  da VM), passo a passo, para o piloto.
 - [`docs/adr/`](docs/adr/): decisões arquiteturais com contexto e alternativas.
 - [`docs/CHIRON_MASTER_ANALYSIS.md`](docs/CHIRON_MASTER_ANALYSIS.md): análise
   que originou o projeto.
@@ -125,6 +128,7 @@ estado vem da API. O navegador não guarda prontuário.
 | `pnpm lint` | ESLint em todos os pacotes |
 | `pnpm test` | Testes de unidade |
 | `pnpm test:integration` | Testes de integração contra PostgreSQL real |
+| `pnpm test:e2e` | Jornadas no navegador (celular e computador) com Playwright, contra API e web de pé e o seed de demonstração. Usa o Chrome instalado; `E2E_BASE_URL` e `E2E_API_URL` apontam para outra pilha |
 | `pnpm db:migrate` | Aplica migrações e dados de referência |
 | `pnpm db:seed` | Dados de demonstração |
 | `pnpm db:reset` | Recria o banco do zero |

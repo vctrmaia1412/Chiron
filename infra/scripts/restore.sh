@@ -18,8 +18,12 @@
 #   Opcionais
 #     RESTORE_CLEAN             1 (padrão) derruba os objetos antes de recriar
 #     RESTORE_JOBS              paralelismo do pg_restore, padrão 2
-#     RLS_GUARD_CMD             comando alternativo da guarda, por exemplo
-#                               "docker compose -f infra/compose/docker-compose.yml exec -T api node dist/database/verify-rls.js"
+#     RLS_GUARD_CMD             comando alternativo da guarda. Dentro do contêiner
+#                               da API, as URLs precisam vir com -e apontando
+#                               para o banco restaurado (o host do banco é
+#                               "postgres"); sem isso a guarda confere o banco
+#                               que está no ar. Exemplo em docs/DEPLOY_GRATUITO.md,
+#                               seção 11.4.
 #
 # O banco alvo precisa existir antes (createdb). Restaurar por cima do banco de
 # produção não é o caminho normal: restaure em um banco novo, confira e só
@@ -180,8 +184,11 @@ elif command -v pnpm > /dev/null 2>&1 && [ -f "${raiz}/apps/api/src/database/ver
   (cd "$raiz" && pnpm --filter @chiron/api exec tsx src/database/verify-rls.ts) || status_guarda=$?
 else
   echo "Dados restaurados, mas a guarda de RLS não pôde rodar: pnpm não está disponível aqui." >&2
-  echo "Rode a guarda pelo contêiner da API e informe RLS_GUARD_CMD, por exemplo:" >&2
-  echo "  docker compose -f infra/compose/docker-compose.yml exec -T api node dist/database/verify-rls.js" >&2
+  echo "Rode a guarda pelo contêiner da API, apontando para o banco restaurado, e informe RLS_GUARD_CMD, por exemplo:" >&2
+  echo "  docker compose -f infra/compose/docker-compose.yml exec -T \\" >&2
+  echo "    -e DATABASE_MIGRATION_URL=postgres://chiron_owner:<senha>@postgres:5432/<banco restaurado> \\" >&2
+  echo "    -e DATABASE_URL=postgres://chiron_app:<senha dos papéis>@postgres:5432/<banco restaurado> \\" >&2
+  echo "    api node dist/database/verify-rls.js" >&2
   exit 1
 fi
 

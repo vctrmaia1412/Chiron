@@ -5,8 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Download, FileText, Upload } from 'lucide-react';
-import type { DocumentDto } from '@chiron/contracts';
-import { api, errorMessage, openSignedUrl } from '@/lib/api';
+import type { DocumentDto, DocumentKind, Patient } from '@chiron/contracts';
+import { api, errorMessage } from '@/lib/api';
+import { UPLOAD_ACCEPT, openDocument, uploadDocument } from '@/lib/documents';
 import { formatDateTime } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import { Badge, Card, CardHeader, EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/ui/primitives';
@@ -16,20 +17,26 @@ import { Field, Input, Select } from '@/components/ui/field';
 import { PatientPicker, type PatientPickerValue } from '@/components/patients/patient-picker';
 import { GenerateDocumentSheet } from '@/components/documents/generate-sheet';
 
-const KIND_LABEL: Record<string, string> = {
+const KIND_LABEL: Record<DocumentKind, string> = {
   prescription: 'Receita',
+  consent: 'Termo de consentimento',
+  report: 'Relatório',
+  exam_result: 'Laudo de exame',
+  imaging: 'Exame de imagem',
+  certificate: 'Atestado',
   health_certificate: 'Atestado de saúde',
   vaccination_certificate: 'Atestado de vacinação',
   attendance_statement: 'Declaração de comparecimento',
   referral_letter: 'Encaminhamento',
   death_certificate: 'Atestado de óbito',
-  consent: 'Termo de consentimento',
-  exam_report: 'Laudo de exame',
-  image: 'Imagem',
   medical_record: 'Prontuário',
+  photo: 'Foto',
   invoice: 'Documento fiscal',
   other: 'Outro',
 };
+
+/** O que a recepção e o veterinário costumam anexar à mão. */
+const UPLOAD_KINDS: DocumentKind[] = ['exam_result', 'imaging', 'photo', 'consent', 'report', 'other'];
 
 function DocumentsView() {
   const params = useSearchParams();
@@ -43,12 +50,16 @@ function DocumentsView() {
     queryFn: () => api.get<{ items: DocumentDto[] }>('/documents', { patientId, limit: 60 }),
   });
 
+  // Vindo da ficha: a lista é de um paciente só, e o caminho de volta é a ficha.
+  const { data: patient } = useQuery({
+    queryKey: ['patient', patientId],
+    queryFn: () => api.get<Patient>(`/patients/${patientId}`),
+    enabled: Boolean(patientId),
+  });
+
   async function download(documentId: string) {
     try {
-      await openSignedUrl(async () => {
-        const result = await api.get<{ url: string }>(`/documents/${documentId}/download`);
-        return result.url;
-      });
+      await openDocument(documentId);
     } catch (caught) {
       toast.error(errorMessage(caught));
     }
@@ -59,8 +70,9 @@ function DocumentsView() {
   return (
     <>
       <PageHeader
-        title="Documentos"
+        title={patient ? `Documentos de ${patient.name}` : 'Documentos'}
         description="Arquivos e documentos gerados. Nada é guardado no navegador: o download usa link assinado de curta duração."
+        back={patientId ? { href: `/pacientes/${patientId}`, label: patient?.name ?? 'Ficha do paciente' } : undefined}
         actions={
           <>
             {can('document:generate') && (
@@ -100,7 +112,7 @@ function DocumentsView() {
                   <p className="truncate text-[14.5px] font-medium text-[var(--ink)]">{document.title}</p>
                   <p className="truncate text-[12.5px] text-[var(--ink-3)]">
                     {[
-                      KIND_LABEL[document.kind] ?? document.kind,
+                      KIND_LABEL[document.kind as DocumentKind] ?? document.kind,
                       formatDateTime(document.createdAt),
                       document.uploadedByName,
                       `${Math.max(1, Math.round(document.sizeBytes / 1024))} KB`,
@@ -144,7 +156,7 @@ function UploadSheet({
   const fileRef = useRef<HTMLInputElement>(null);
   const [patient, setPatient] = useState<PatientPickerValue | null>(null);
   const [title, setTitle] = useState('');
-  const [kind, setKind] = useState('exam_report');
+  const [kind, setKind] = useState<DocumentKind>('exam_result');
   const [file, setFile] = useState<File | null>(null);
 
   const mutation = useMutation({
@@ -153,31 +165,11 @@ function UploadSheet({
       if (!targetId) throw new Error('Escolha o paciente.');
       if (!file) throw new Error('Selecione o arquivo.');
 
-      // Passo 1: o servidor registra o documento e devolve uma URL assinada.
-      const created = await api.post<{
-        documentId: string;
-        uploadUrl: string;
-        method: 'PUT' | 'POST';
-        headers: Record<string, string>;
-      }>('/documents/uploads', {
+      return uploadDocument(file, {
         kind,
         title: title.trim() || file.name,
-        mimeType: file.type,
-        sizeBytes: file.size,
         links: [{ targetType: 'patient', targetId }],
       });
-
-      // Passo 2: o navegador envia direto ao armazenamento.
-      const upload = await fetch(created.uploadUrl, {
-        method: created.method,
-        headers: created.headers,
-        body: file,
-      });
-      if (!upload.ok) throw new Error('Falha ao enviar o arquivo para o armazenamento.');
-
-      // Passo 3: o servidor confere os bytes contra o tipo declarado.
-      await api.post(`/documents/${created.documentId}/complete`, {});
-      return created.documentId;
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['documents'] });
@@ -211,11 +203,12 @@ function UploadSheet({
         {!presetPatientId && <PatientPicker value={patient} onChange={setPatient} />}
 
         <Field label="Tipo">
-          <Select value={kind} onChange={(event) => setKind(event.target.value)}>
-            <option value="exam_report">Laudo de exame</option>
-            <option value="image">Imagem</option>
-            <option value="consent">Termo de consentimento</option>
-            <option value="other">Outro</option>
+          <Select value={kind} onChange={(event) => setKind(event.target.value as DocumentKind)}>
+            {UPLOAD_KINDS.map((value) => (
+              <option key={value} value={value}>
+                {KIND_LABEL[value]}
+              </option>
+            ))}
           </Select>
         </Field>
 
@@ -231,7 +224,7 @@ function UploadSheet({
           <input
             ref={fileRef}
             type="file"
-            accept="application/pdf,image/jpeg,image/png,image/webp"
+            accept={UPLOAD_ACCEPT}
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             className="w-full rounded-[var(--radius)] border border-dashed border-[var(--border-strong)] px-3 py-3 text-[13.5px] text-[var(--ink-2)] file:mr-3 file:rounded-[var(--radius-sm)] file:border-0 file:bg-[var(--brand-soft)] file:px-3 file:py-1.5 file:text-[13px] file:font-medium file:text-[var(--brand-ink)]"
           />

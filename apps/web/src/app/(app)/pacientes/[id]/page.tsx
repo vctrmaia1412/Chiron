@@ -2,25 +2,27 @@
 
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
   CalendarPlus,
   FileText,
+  FlaskConical,
   Pencil,
-  Phone,
+  Play,
   ScrollText,
   Stethoscope,
   Weight,
 } from 'lucide-react';
-import type { Patient } from '@chiron/contracts';
+import { useRouter } from 'next/navigation';
+import type { EncounterDetail, EncounterSummary } from '@chiron/contracts';
+import { PatientSummaryCard } from '@/components/clinical/patient-summary';
+import type { Patient, PatientAllergy } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
-import { formatDate, formatDateTime, formatPhone, formatWeight, whatsappLink } from '@/lib/format';
+import { formatDate, formatDateTime, formatWeight } from '@/lib/format';
 import {
   ALERT_KIND,
-  GUARDIAN_ROLE,
-  IDENTIFIER_SCHEME,
   PATIENT_STATUS,
   REPRODUCTIVE_STATUS,
   SEVERITY,
@@ -29,26 +31,64 @@ import {
   statusFor,
 } from '@/lib/labels';
 import { useSession } from '@/lib/session';
-import { Badge, Card, CardHeader, DataRow, EmptyState, ErrorState, PageHeader, Skeleton } from '@/components/ui/primitives';
+import { Badge, Card, CardHeader, DataRow, ErrorState, PageHeader, Skeleton } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
 import { PatientFormSheet } from '@/components/patients/patient-form';
 import { PatientTimeline } from '@/components/patients/patient-timeline';
 import { WeightChart } from '@/components/patients/weight-chart';
+import { DeathSheet } from '@/components/patients/death-sheet';
+import { PatientGuardiansCard } from '@/components/patients/patient-guardians-card';
+import { PatientAlertsCard } from '@/components/patients/patient-alerts-card';
+import { PatientIdentifiersCard } from '@/components/patients/patient-identifiers-card';
+import { PatientInactiveBanner, PatientStatusAction } from '@/components/patients/patient-status';
+import { AllergyStatusSheet } from '@/components/patients/allergy-status-sheet';
+import { GenerateDocumentSheet } from '@/components/documents/generate-sheet';
+import { PatientImmunizationsCard } from '@/components/immunization/patient-immunizations-card';
 
 export default function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { can } = useSession();
+  const { can, hasModule } = useSession();
   const queryClient = useQueryClient();
+  const router = useRouter();
+
+  // Atendimento já aberto para este paciente: o botão continua esse, em vez
+  // de abrir um segundo por engano.
+  const { data: openEncounters } = useQuery({
+    queryKey: ['encounters', 'open', 'patient', id],
+    queryFn: () => api.get<{ items: EncounterSummary[] }>('/encounters', { patientId: id, open: true, limit: 1 }),
+    enabled: hasModule('clinical') && can('encounter:read'),
+  });
+  const openEncounter = openEncounters?.items[0];
+
+  // Paciente na mesa sem agendamento: um toque abre o atendimento.
+  const startEncounter = useMutation({
+    mutationFn: () => api.post<EncounterDetail>('/encounters', { patientId: id, class: 'outpatient' }),
+    onSuccess: async (encounter) => {
+      await queryClient.invalidateQueries({ queryKey: ['encounters'] });
+      router.push(`/atendimentos/${encounter.id}`);
+    },
+    onError: (caught) => toast.error(errorMessage(caught)),
+  });
 
   const [editOpen, setEditOpen] = useState(false);
   const [weightOpen, setWeightOpen] = useState(false);
   const [allergyOpen, setAllergyOpen] = useState(false);
+  const [deathOpen, setDeathOpen] = useState(false);
+  const [retiringAllergy, setRetiringAllergy] = useState<PatientAllergy | null>(null);
+  const [generate, setGenerate] = useState<{ template?: string; fields?: Record<string, string> } | null>(null);
 
   const { data: patient, isLoading, error, refetch } = useQuery({
     queryKey: ['patient', id],
     queryFn: () => api.get<Patient>(`/patients/${id}`),
+  });
+
+  const { data: death } = useQuery({
+    queryKey: ['patient', id, 'death'],
+    queryFn: () =>
+      api.get<{ occurredAt: string; kind: string; causeText: string | null } | null>(`/patients/${id}/death`),
+    enabled: patient?.status === 'deceased' && hasModule('clinical') && can('encounter:read'),
   });
 
   if (error) {
@@ -76,6 +116,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
   return (
     <>
       <PageHeader
+        back={{ href: '/pacientes', label: 'Pacientes' }}
         breadcrumb={
           <Link href="/pacientes" className="hover:text-[var(--brand)]">
             Pacientes
@@ -99,6 +140,23 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
           .join(' · ')}
         actions={
           <>
+            {openEncounter ? (
+              <Button asChild size="sm">
+                <Link href={`/atendimentos/${openEncounter.id}`}>
+                  <Play className="h-4 w-4" />
+                  Continuar atendimento
+                </Link>
+              </Button>
+            ) : (
+              hasModule('clinical') &&
+              can('encounter:create') &&
+              patient.status === 'active' && (
+                <Button size="sm" onClick={() => startEncounter.mutate()} loading={startEncounter.isPending}>
+                  <Play className="h-4 w-4" />
+                  Atender agora
+                </Button>
+              )
+            )}
             {can('patient:update') && (
               <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
                 <Pencil className="h-4 w-4" />
@@ -114,7 +172,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               </Button>
             )}
             {can('record:read_sensitive') && (
-              <Button asChild size="sm">
+              <Button asChild size="sm" variant="secondary">
                 <Link href={`/pacientes/${patient.id}/prontuario`}>
                   <ScrollText className="h-4 w-4" />
                   Prontuário
@@ -125,15 +183,40 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
         }
       />
 
+      <PatientInactiveBanner patient={patient} />
+
       {(activeAlerts.length > 0 || activeAllergies.length > 0 || patient.status === 'deceased') && (
         <div className="mb-4 space-y-2">
           {patient.status === 'deceased' && (
             <div className="flex items-start gap-2 rounded-[var(--radius)] border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-3 py-2.5 text-[13.5px] text-[var(--danger)]">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                Óbito registrado{patient.deceasedAt ? ` em ${formatDate(patient.deceasedAt)}` : ''}. O prontuário
-                permanece disponível para consulta.
+              <span className="min-w-0 flex-1">
+                Óbito registrado
+                {death?.occurredAt || patient.deceasedAt
+                  ? ` em ${formatDate(death?.occurredAt ?? patient.deceasedAt)}`
+                  : ''}
+                {death?.kind === 'euthanasia' ? ' (eutanásia)' : ''}
+                {death?.causeText ? `. Causa provável: ${death.causeText}` : ''}. O prontuário permanece disponível
+                para consulta.
               </span>
+              {can('document:generate') && hasModule('documents') && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    setGenerate({
+                      template: 'death_certificate',
+                      fields: {
+                        occurredAt: (death?.occurredAt ?? patient.deceasedAt ?? '').slice(0, 10),
+                        cause: death?.causeText ?? '',
+                      },
+                    })
+                  }
+                >
+                  <FileText className="h-4 w-4" />
+                  Atestado de óbito
+                </Button>
+              )}
             </div>
           )}
           {activeAllergies.map((allergy) => {
@@ -165,7 +248,13 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr] md:gap-5">
+      {hasModule('clinical') && can('encounter:read') && (
+        <div className="mb-4 md:mb-5">
+          <PatientSummaryCard patientId={patient.id} canEditProblems={can('encounter:update')} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] md:gap-5">
         <div className="space-y-4 md:space-y-5">
           <Card>
             <CardHeader
@@ -192,61 +281,11 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
             </div>
           </Card>
 
-          <Card>
-            <CardHeader title="Tutores" />
-            {patient.guardians.length === 0 ? (
-              <EmptyState title="Sem tutor vinculado" description="Vincule um responsável ao paciente." />
-            ) : (
-              <ul className="divide-y divide-[var(--border)]">
-                {patient.guardians.map((link) => {
-                  const wa = whatsappLink(link.guardianPhone);
-                  return (
-                    <li key={link.guardianId} className="px-4 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <Link
-                            href={`/tutores/${link.guardianId}`}
-                            className="block truncate text-[14.5px] font-medium text-[var(--ink)] hover:text-[var(--brand)]"
-                          >
-                            {link.guardianName}
-                          </Link>
-                          <p className="text-[12.5px] text-[var(--ink-3)]">
-                            {labelFor(GUARDIAN_ROLE, link.role)}
-                            {link.isPrimary ? ' · principal' : ''}
-                          </p>
-                          {link.guardianPhone && (
-                            <p className="mt-0.5 text-[13px] text-[var(--ink-2)]">{formatPhone(link.guardianPhone)}</p>
-                          )}
-                        </div>
-                        {link.guardianPhone && (
-                          <div className="flex shrink-0 gap-1">
-                            <a
-                              href={`tel:${link.guardianPhone.replace(/\D/g, '')}`}
-                              aria-label="Ligar"
-                              className="flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-[var(--border-strong)] text-[var(--ink-2)]"
-                            >
-                              <Phone className="h-4 w-4" />
-                            </a>
-                            {wa && (
-                              <a
-                                href={wa}
-                                target="_blank"
-                                rel="noreferrer"
-                                aria-label="WhatsApp"
-                                className="flex h-9 items-center rounded-[var(--radius)] border border-[var(--border-strong)] px-2.5 text-[12.5px] font-medium text-[var(--ink-2)]"
-                              >
-                                WhatsApp
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
+          <PatientGuardiansCard patient={patient} />
+
+          <PatientAlertsCard patient={patient} />
+
+          <PatientIdentifiersCard patient={patient} />
 
           <Card>
             <CardHeader title="Cadastro" />
@@ -262,13 +301,6 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               <DataRow label="Idade" value={patient.ageLabel} />
               <DataRow label="Pelagem" value={patient.colorMarkings} />
               <DataRow label="Código interno" value={patient.internalCode} />
-              {patient.identifiers.map((identifier) => (
-                <DataRow
-                  key={identifier.id}
-                  label={labelFor(IDENTIFIER_SCHEME, identifier.scheme)}
-                  value={<span className="font-mono text-[13px]">{identifier.value}</span>}
-                />
-              ))}
               {Object.entries(patient.attributes ?? {})
                 .filter(([key]) => key !== 'scientificName')
                 .map(([key, value]) => (
@@ -280,6 +312,11 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               <div className="border-t border-[var(--border)] px-4 py-3">
                 <p className="text-[12px] font-semibold uppercase tracking-wider text-[var(--ink-3)]">Observações</p>
                 <p className="mt-1 whitespace-pre-wrap text-[13.5px] text-[var(--ink-2)]">{patient.notes}</p>
+              </div>
+            )}
+            {patient.status === 'active' && can('patient:update') && (
+              <div className="border-t border-[var(--border)] px-4 py-2">
+                <PatientStatusAction patient={patient} />
               </div>
             )}
           </Card>
@@ -315,9 +352,23 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
                           <p className="text-[12.5px] text-[var(--ink-3)]">{allergy.reaction}</p>
                         )}
                       </div>
-                      <Badge tone={allergy.status === 'active' ? severity.tone : 'muted'}>
-                        {allergy.status === 'active' ? severity.label : 'Inativa'}
-                      </Badge>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <Badge tone={allergy.status === 'active' ? severity.tone : 'muted'}>
+                          {allergy.status === 'active' ? severity.label : 'Inativa'}
+                        </Badge>
+                        {/* Tirar da lista ativa é decisão clínica; registrar, qualquer um do cadastro. */}
+                        {allergy.status === 'active' && hasModule('clinical') && can('encounter:update') && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="-mr-2"
+                            onClick={() => setRetiringAllergy(allergy)}
+                            aria-label={`Retirar alergia a ${allergy.substance}`}
+                          >
+                            Retirar
+                          </Button>
+                        )}
+                      </div>
                     </li>
                   );
                 })}
@@ -326,28 +377,39 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
           </Card>
         </div>
 
-        <div className="space-y-4 md:space-y-5">
+        {/* No celular o histórico clínico vem antes de peso e cadastro: é o
+            que o veterinário procura ao abrir a ficha. */}
+        <div className="order-first space-y-4 md:space-y-5 lg:order-none">
           <Card>
             <CardHeader
-              title="Histórico"
-              description="Eventos montados a partir dos registros clínicos."
+              title="Histórico clínico"
+              description="Os eventos mais recentes. O prontuário completo tem tudo."
               action={
-                <Link
-                  href={`/pacientes/${patient.id}/prontuario`}
-                  className="text-[13px] font-medium text-[var(--brand)]"
-                >
-                  Prontuário completo
-                </Link>
+                can('record:read_sensitive') ? (
+                  <Link
+                    href={`/pacientes/${patient.id}/prontuario`}
+                    className="text-[13px] font-medium text-[var(--brand)]"
+                  >
+                    Prontuário completo
+                  </Link>
+                ) : undefined
               }
             />
-            <PatientTimeline patientId={patient.id} limit={30} />
+            <PatientTimeline patientId={patient.id} limit={10} clinicalOnly />
           </Card>
 
           <div className="grid gap-3 sm:grid-cols-2">
+            {can('record:read_sensitive') && (
+              <QuickLink
+                href={`/pacientes/${patient.id}/prontuario`}
+                icon={<Stethoscope className="h-4 w-4" />}
+                label="Atendimentos e evolução"
+              />
+            )}
             <QuickLink
-              href={`/pacientes/${patient.id}/prontuario`}
-              icon={<Stethoscope className="h-4 w-4" />}
-              label="Atendimentos e evolução"
+              href={`/exames?pacienteId=${patient.id}`}
+              icon={<FlaskConical className="h-4 w-4" />}
+              label="Exames e resultados"
             />
             <QuickLink
               href={`/documentos?pacienteId=${patient.id}`}
@@ -355,6 +417,28 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
               label="Documentos do paciente"
             />
           </div>
+
+          <PatientImmunizationsCard patientId={patient.id} active={patient.status === 'active'} />
+
+          {((can('document:generate') && hasModule('documents')) ||
+            (can('death:record') && hasModule('clinical') && patient.status === 'active')) && (
+            <Card>
+              <CardHeader title="Documentos e registros" />
+              <div className="flex flex-wrap gap-2 px-4 py-3">
+                {can('document:generate') && hasModule('documents') && (
+                  <Button variant="secondary" size="sm" onClick={() => setGenerate({})}>
+                    <FileText className="h-4 w-4" />
+                    Atestado, termo ou declaração
+                  </Button>
+                )}
+                {can('death:record') && hasModule('clinical') && patient.status === 'active' && (
+                  <Button variant="ghost" size="sm" onClick={() => setDeathOpen(true)}>
+                    Registrar óbito
+                  </Button>
+                )}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 
@@ -369,11 +453,39 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
           void queryClient.invalidateQueries({ queryKey: ['timeline', patient.id] });
         }}
       />
+      <DeathSheet
+        open={deathOpen}
+        onOpenChange={setDeathOpen}
+        patient={patient}
+        onRecorded={(recorded) => {
+          // O atestado é o próximo passo: abre já preenchido com o que foi registrado.
+          if (can('document:generate') && hasModule('documents')) {
+            setGenerate({
+              template: 'death_certificate',
+              fields: { occurredAt: recorded.occurredAt, cause: recorded.causeText },
+            });
+          }
+        }}
+      />
+      <GenerateDocumentSheet
+        open={generate !== null}
+        onOpenChange={(next) => {
+          if (!next) setGenerate(null);
+        }}
+        presetPatientId={patient.id}
+        presetTemplate={generate?.template}
+        presetFields={generate?.fields}
+      />
       <AllergySheet
         open={allergyOpen}
         onOpenChange={setAllergyOpen}
         patientId={patient.id}
         onSaved={() => void queryClient.invalidateQueries({ queryKey: ['patient', patient.id] })}
+      />
+      <AllergyStatusSheet
+        patientId={patient.id}
+        allergy={retiringAllergy}
+        onClose={() => setRetiringAllergy(null)}
       />
     </>
   );
@@ -470,16 +582,17 @@ function WeightSheet({
         </>
       }
     >
-      <Field label="Peso" required>
+      <Field label="Peso" required htmlFor="peso-novo">
         <div className="flex gap-2">
           <Input
+            id="peso-novo"
             autoFocus
             value={value}
             onChange={(event) => setValue(event.target.value)}
             inputMode="decimal"
             placeholder={uom === 'g' ? '92' : '8,4'}
           />
-          <Select value={uom} onChange={(event) => setUom(event.target.value as 'kg' | 'g')} className="w-24">
+          <Select value={uom} aria-label="Unidade do peso" onChange={(event) => setUom(event.target.value as 'kg' | 'g')} className="w-24">
             <option value="kg">kg</option>
             <option value="g">g</option>
           </Select>

@@ -124,6 +124,9 @@ services:
       COLUMN_HASH_KEY: ${COLUMN_HASH_KEY}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # "Criar conta" na tela de login. false = só entra quem for convidado.
+      SIGNUP_ENABLED: ${SIGNUP_ENABLED:-true}
+      SIGNUP_PER_IP_PER_HOUR: ${SIGNUP_PER_IP_PER_HOUR:-5}
     depends_on:
       postgres:
         condition: service_healthy

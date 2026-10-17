@@ -7,13 +7,12 @@ import { toast } from 'sonner';
 import { Download, EyeOff, FileText, Printer } from 'lucide-react';
 import type { MedicalRecord, Patient } from '@chiron/contracts';
 import { api, errorMessage, openSignedUrl } from '@/lib/api';
-import { formatDate, formatDateTime, formatWeight } from '@/lib/format';
-import { DISPOSITION, ENCOUNTER_CLASS, ENCOUNTER_STATUS, labelFor, statusFor } from '@/lib/labels';
+import { formatWeight } from '@/lib/format';
 import { useSession } from '@/lib/session';
-import { Badge, Card, CardHeader, EmptyState, ErrorState, PageHeader, SectionTitle, Skeleton } from '@/components/ui/primitives';
+import { Card, EmptyState, ErrorState, PageHeader, Skeleton } from '@/components/ui/primitives';
 import { Button } from '@/components/ui/button';
 import { Tabs } from '@/components/ui/tabs';
-import { DiagnosisList, NoteBlock, ObservationGrid, PrescriptionBlock, sortNotes } from '@/components/clinical/clinical-blocks';
+import { RecordEncounterEntry } from '@/components/clinical/record-entry';
 import { PatientTimeline } from '@/components/patients/patient-timeline';
 
 export default function MedicalRecordPage({ params }: { params: Promise<{ id: string }> }) {
@@ -56,6 +55,7 @@ export default function MedicalRecordPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <PageHeader
+        back={{ href: `/pacientes/${id}`, label: patient?.name ?? 'Paciente' }}
         breadcrumb={
           <span className="flex items-center gap-1.5">
             <Link href="/pacientes" className="hover:text-[var(--brand)]">
@@ -132,122 +132,15 @@ export default function MedicalRecordPage({ params }: { params: Promise<{ id: st
           />
         </Card>
       ) : (
-        <div className="space-y-4 md:space-y-5">
-          {data.encounters.map((entry) => {
-            const status = statusFor(ENCOUNTER_STATUS, entry.encounter.status);
-            const notes = sortNotes(entry.notes);
-            const activeNotes = notes.filter((note) => !note.supersededByNoteId);
-            const supersededNotes = notes.filter((note) => note.supersededByNoteId);
-
-            return (
-              <Card key={entry.encounter.id} className="break-inside-avoid">
-                <CardHeader
-                  title={
-                    <span className="flex flex-wrap items-center gap-2">
-                      {formatDate(entry.encounter.startedAt ?? entry.encounter.arrivedAt ?? entry.encounter.createdAt)}
-                      <span className="text-[13px] font-normal text-[var(--ink-3)]">
-                        {entry.encounter.serviceName ?? labelFor(ENCOUNTER_CLASS, entry.encounter.class)}
-                      </span>
-                      <Badge tone={status.tone}>{status.label}</Badge>
-                    </span>
-                  }
-                  description={[
-                    entry.encounter.attendingProfessional?.name,
-                    `Atendimento nº ${entry.encounter.number}`,
-                    entry.encounter.disposition ? labelFor(DISPOSITION, entry.encounter.disposition) : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                  action={
-                    <Link
-                      href={`/atendimentos/${entry.encounter.id}`}
-                      className="text-[13px] font-medium text-[var(--brand)] no-print"
-                    >
-                      Abrir
-                    </Link>
-                  }
-                />
-
-                <div className="space-y-4 px-4 py-4">
-                  {entry.encounter.chiefComplaint && (
-                    <div>
-                      <SectionTitle>Queixa</SectionTitle>
-                      <p className="mt-1 text-[14px] text-[var(--ink)]">{entry.encounter.chiefComplaint}</p>
-                    </div>
-                  )}
-
-                  {entry.observations.length > 0 && (
-                    <div>
-                      <SectionTitle>Sinais vitais</SectionTitle>
-                      <div className="mt-2">
-                        <ObservationGrid observations={entry.observations} />
-                      </div>
-                    </div>
-                  )}
-
-                  {activeNotes.length > 0 && (
-                    <div className="space-y-2">
-                      <SectionTitle>Registro clínico</SectionTitle>
-                      {activeNotes.map((note) => (
-                        <NoteBlock key={note.id} note={note} />
-                      ))}
-                    </div>
-                  )}
-
-                  {supersededNotes.length > 0 && (
-                    <details className="rounded-[var(--radius)] border border-dashed border-[var(--border-strong)] px-3 py-2">
-                      <summary className="cursor-pointer text-[13px] font-medium text-[var(--ink-3)]">
-                        Versões anteriores ({supersededNotes.length})
-                      </summary>
-                      <div className="mt-2 space-y-2">
-                        {supersededNotes.map((note) => (
-                          <NoteBlock key={note.id} note={note} />
-                        ))}
-                      </div>
-                    </details>
-                  )}
-
-                  {entry.diagnoses.length > 0 && (
-                    <div>
-                      <SectionTitle>Diagnósticos</SectionTitle>
-                      <div className="mt-1.5">
-                        <DiagnosisList diagnoses={entry.diagnoses} />
-                      </div>
-                    </div>
-                  )}
-
-                  {entry.prescriptions.length > 0 && (
-                    <div className="space-y-2">
-                      <SectionTitle>Receitas</SectionTitle>
-                      {entry.prescriptions.map((prescription) => (
-                        <PrescriptionBlock key={prescription.id} prescription={prescription} />
-                      ))}
-                    </div>
-                  )}
-
-                  {entry.examOrderIds.length > 0 && (
-                    <div>
-                      <SectionTitle>Exames</SectionTitle>
-                      <p className="mt-1 text-[13.5px] text-[var(--ink-2)]">
-                        {entry.examOrderIds.length === 1
-                          ? '1 pedido de exame vinculado.'
-                          : `${entry.examOrderIds.length} pedidos de exame vinculados.`}{' '}
-                        <Link href={`/exames?pacienteId=${id}`} className="font-medium text-[var(--brand)] no-print">
-                          Ver resultados
-                        </Link>
-                      </p>
-                    </div>
-                  )}
-
-                  {entry.encounter.endedAt && (
-                    <p className="border-t border-[var(--border)] pt-2 text-[11.5px] text-[var(--ink-3)]">
-                      Finalizado em {formatDateTime(entry.encounter.endedAt)}
-                    </p>
-                  )}
-                </div>
-              </Card>
-            );
-          })}
+        <div className="space-y-3">
+          {data.encounters.map((entry, index) => (
+            <RecordEncounterEntry
+              key={entry.encounter.id}
+              entry={entry}
+              patientId={id}
+              defaultOpen={index === 0}
+            />
+          ))}
         </div>
       )}
     </>

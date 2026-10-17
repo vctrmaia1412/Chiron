@@ -87,7 +87,7 @@ export class AppointmentsController {
   @Authorize('scheduling', 'appointment:read')
   followUps(
     @Req() req: AuthedRequest,
-    @Query(zQuery(listFollowUpsQuerySchema)) query: { dueUntil?: string; limit: number },
+    @Query(zQuery(listFollowUpsQuerySchema)) query: { dueUntil?: string; q?: string; limit: number },
   ) {
     return this.appointments.listFollowUps(ctxOf(req), query);
   }

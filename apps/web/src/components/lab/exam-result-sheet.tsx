@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { ExamOrderItem } from '@chiron/contracts';
 import { api, errorMessage } from '@/lib/api';
+import { UPLOAD_ACCEPT, uploadDocument } from '@/lib/documents';
 import { useExamCatalog } from '@/lib/catalog';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -24,7 +25,17 @@ interface ValueDraft {
  * novo, o servidor cria uma retificação que supersede a anterior e mantém as
  * duas versões visíveis.
  */
-function ExamResultSheetContent({ item, onClose }: { item: ExamOrderItem | null; onClose: () => void }) {
+function ExamResultSheetContent({
+  item,
+  orderId,
+  patientId,
+  onClose,
+}: {
+  item: ExamOrderItem | null;
+  orderId: string;
+  patientId: string;
+  onClose: () => void;
+}) {
   const queryClient = useQueryClient();
   const { data: catalog = [] } = useExamCatalog(Boolean(item));
 
@@ -64,12 +75,25 @@ function ExamResultSheetContent({ item, onClose }: { item: ExamOrderItem | null;
   const [reportText, setReportText] = useState(item?.result?.reportText ?? '');
   const [interpretation, setInterpretation] = useState(item?.result?.interpretation ?? '');
   const [status, setStatus] = useState<'preliminary' | 'final'>('final');
+  // Laudo do laboratório (PDF ou foto do papel): muitas vezes é só isso que chega.
+  const [reportFile, setReportFile] = useState<File | null>(null);
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!item) throw new Error('Item não informado.');
+      const documentId = reportFile
+        ? await uploadDocument(reportFile, {
+            kind: 'exam_result',
+            title: `Laudo: ${item.examName}`,
+            links: [
+              { targetType: 'patient', targetId: patientId },
+              { targetType: 'exam_order', targetId: orderId },
+            ],
+          })
+        : (item.result?.documentId ?? undefined);
       return api.post(`/exam-orders/items/${item.id}/result`, {
         status,
+        documentId,
         reportText: reportText.trim() || undefined,
         interpretation: interpretation.trim() || undefined,
         values: values
@@ -179,6 +203,22 @@ function ExamResultSheetContent({ item, onClose }: { item: ExamOrderItem | null;
 
         <Field label="Observações técnicas">
           <Textarea value={reportText} onChange={(event) => setReportText(event.target.value)} rows={2} />
+        </Field>
+
+        <Field
+          label="Laudo em PDF ou foto"
+          hint={
+            item?.result?.documentId && !reportFile
+              ? 'O laudo já anexado continua valendo. Escolha outro arquivo para substituir.'
+              : 'Opcional. PDF, JPEG, PNG ou WebP até 25 MB.'
+          }
+        >
+          <input
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            onChange={(event) => setReportFile(event.target.files?.[0] ?? null)}
+            className="w-full rounded-[var(--radius)] border border-dashed border-[var(--border-strong)] px-3 py-3 text-[13.5px] text-[var(--ink-2)] file:mr-3 file:rounded-[var(--radius-sm)] file:border-0 file:bg-[var(--brand-soft)] file:px-3 file:py-1.5 file:text-[13px] file:font-medium file:text-[var(--brand-ink)]"
+          />
         </Field>
 
         <Field label="Situação">

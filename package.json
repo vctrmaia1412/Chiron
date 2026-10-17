@@ -13,6 +13,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:integration": "pnpm --filter @chiron/api test:integration",
+    "test:e2e": "pnpm --filter @chiron/e2e test:e2e",
     "db:migrate": "pnpm --filter @chiron/api db:migrate",
     "db:seed": "pnpm --filter @chiron/api db:seed",
     "db:reset": "pnpm --filter @chiron/api db:reset",

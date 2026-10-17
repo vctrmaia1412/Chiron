@@ -1,0 +1,105 @@
+# Sobreposição para colocar a pilha na internet, numa VM própria (Oracle
+# Cloud Always Free ou qualquer Linux com IP público). Nunca sobe sozinha: vai
+# sempre junto do arquivo principal, e o atalho infra/scripts/dc.sh já monta
+# a linha inteira.
+#
+#   docker compose -f infra/compose/docker-compose.yml \
+#                  -f infra/compose/docker-compose.publico.yml \
+#                  --env-file .env.stack up -d --build
+#
+# O .env.stack de servidor sai pronto do infra/scripts/gerar-env.sh. Guia
+# passo a passo: docs/DEPLOY_GRATUITO.md.
+#
+# O que muda em relação à pilha local:
+# - o Caddy escuta 80 e 443 e obtém sozinho o certificado Let's Encrypt de
+#   CHIRON_DOMAIN; a porta 8080 continua, mas só no 127.0.0.1 da VM, para as
+#   conferências do RUNBOOK (curl http://localhost:8080/api/v1/ready);
+# - os documentos (MinIO) ficam acessíveis ao navegador na mesma origem, em
+#   https://CHIRON_DOMAIN/<bucket>/..., porque o upload e o download usam URL
+#   assinada direto no storage;
+# - a API recebe o endereço público do storage e a configuração de e-mail,
+#   que o arquivo principal não repassa, e o migrador recebe o que as
+#   invariantes de produção exigem para ele subir com APP_ENV=prod;
+# - Postgres e MinIO publicam porta só no loopback, para o backup do host
+#   (infra/scripts/backup-vm.sh); nada disso fica acessível de fora;
+# - o Redis, declarado e ainda não usado por nenhum serviço, não sobe;
+# - o MinIO vem da imagem da Chainguard (ver o serviço abaixo).
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  # Sem consumidor hoje (REDIS_URL é declarada e não lida). Fica fora até
+  # algum serviço precisar; para subir mesmo assim: --profile redis.
+  redis:
+    profiles: ["redis"]
+
+  minio:
+    # A imagem minio/minio saiu do Docker Hub em setembro de 2026 e o projeto
+    # comunitário foi arquivado: numa VM nova o `docker pull` do arquivo
+    # principal falha. A Chainguard publica de graça uma build do mesmo
+    # servidor (amd64 e arm64, com o `mc` que o healthcheck usa), só na tag
+    # latest. Mesmas variáveis e mesmo formato de dados. Conferido em
+    # 15/10/2026 (RELEASE.2026-09-22T19-25-18Z).
+    image: cgr.dev/chainguard/minio:latest
+    # A imagem da Chainguard roda como o usuário 65532, mas volume nomeado novo
+    # nasce do root: numa VM recém-criada o MinIO morria com "Unable to
+    # initialize backend: file access denied". Como root ele se comporta como a
+    # minio/minio antiga, e um volume que já veio dela continua legível.
+    # Conferido em 15/10/2026 com volume novo: sobe, e `mc ready local` passa.
+    user: "0:0"
+    ports:
+      - "127.0.0.1:9000:9000"
+
+  # O migrador valida a configuração com o mesmo schema da API. Com
+  # APP_ENV=prod ele exige as mesmas invariantes de produção (cookie seguro,
+  # URL https pública, credencial de storage, papéis separados) e, sem estas
+  # variáveis, que o arquivo principal não repassa, morre antes de migrar e a
+  # API nunca sobe. Nenhuma delas é usada pela migração em si.
+  migrate:
+    environment:
+      DATABASE_IAM_URL: postgres://chiron_iam:${DATABASE_ROLE_PASSWORD}@postgres:5432/chiron
+      DATABASE_ADMIN_URL: postgres://chiron_admin:${DATABASE_ROLE_PASSWORD}@postgres:5432/chiron
+      PUBLIC_APP_URL: ${STACK_PUBLIC_URL:?defina STACK_PUBLIC_URL no .env.stack}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+
+  api:
+    environment:
+      # A assinatura SigV4 cobre o host: a URL precisa sair assinada já com o
+      # endereço que o navegador usa, e o proxy entrega ao MinIO com esse Host.
+      S3_PUBLIC_ENDPOINT: https://${CHIRON_DOMAIN:?defina CHIRON_DOMAIN no .env.stack}
+      # Convite e redefinição de senha. Com APP_ENV=prod a API exige
+      # EMAIL_PROVIDER=resend para enviar; fora de prod, sem provedor, o link
+      # vai para o log (modo seco).
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-none}
+      EMAIL_API_KEY: ${EMAIL_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-CHIRON <nao-responda@chiron.local>}
+
+  proxy:
+    command:
+      - caddy
+      - run
+      - --config
+      - /etc/caddy/chiron/${PROXY_CADDYFILE:-Caddyfile.publico}
+      - --adapter
+      - caddyfile
+    environment:
+      CHIRON_DOMAIN: ${CHIRON_DOMAIN:?defina CHIRON_DOMAIN no .env.stack}
+      ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL no .env.stack}
+      # Mesmo padrão do arquivo principal: o caminho exposto tem de ser o
+      # bucket que a API usa.
+      S3_BUCKET: ${S3_BUCKET:-chiron}
+      # Só o Caddyfile.demo lê estas duas.
+      DEMO_USUARIO: ${DEMO_USUARIO:-demo}
+      DEMO_SENHA_HASH: ${DEMO_SENHA_HASH:-}
+    # Substitui a lista do arquivo principal em vez de somar a ela.
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "127.0.0.1:${PROXY_PORT:-8080}:8080"
+    volumes:
+      - ../proxy:/etc/caddy/chiron:ro

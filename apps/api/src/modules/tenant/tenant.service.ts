@@ -151,6 +151,9 @@ export class TenantService {
     if (def.alwaysOn && state === 'disabled') {
       throw AppError.validation('O módulo núcleo não pode ser desabilitado.');
     }
+    if (!def.available && state === 'active') {
+      throw AppError.validation(`${def.name} ainda não está disponível.`);
+    }
 
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       const { rows: current } = await tx.query<{ module_key: string; state: string }>(

@@ -23,22 +23,29 @@ const FILTERS = [
   { key: 'todos', label: 'Todos' },
 ];
 
+/** Aparece só quando chega pelo alerta do painel. */
+const STALE_FILTER = { key: 'rascunhos', label: 'Abertos há mais de 1 dia' };
+
 function EncountersList() {
   const router = useRouter();
   const params = useSearchParams();
   const { can } = useSession();
   const [filter, setFilter] = useState(() => {
+    if (params.get('rascunhos')) return STALE_FILTER.key;
     const preset = params.get('filtro');
     return preset && FILTERS.some((item) => item.key === preset) ? preset : 'abertos';
   });
+  const filters = filter === STALE_FILTER.key ? [...FILTERS, STALE_FILTER] : FILTERS;
   const [walkInOpen, setWalkInOpen] = useState(false);
 
   const query = (() => {
     switch (filter) {
       case 'aguardando':
-        return { status: 'arrived' as const };
+        return { stage: 'waiting' as const };
       case 'andamento':
-        return { status: 'in_progress' as const };
+        return { stage: 'active' as const };
+      case 'rascunhos':
+        return { stage: 'stale' as const };
       case 'finalizados':
         return { status: 'finished' as const };
       case 'todos':
@@ -71,7 +78,7 @@ function EncountersList() {
         }
       />
 
-      <FilterChips className="mb-3" value={filter} onChange={setFilter} items={FILTERS} />
+      <FilterChips className="mb-3" value={filter} onChange={setFilter} items={filters} />
 
       <Card>
         {error ? (

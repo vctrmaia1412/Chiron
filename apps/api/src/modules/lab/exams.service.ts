@@ -86,10 +86,13 @@ export class ExamsService {
 
   async list(
     ctx: RequestContext,
-    params: { patientId?: string; encounterId?: string; status?: string; pending?: boolean; limit: number },
+    params: { patientId?: string; encounterId?: string; status?: string; pending?: boolean; limit: number; q?: string },
   ): Promise<{ items: ExamOrder[] }> {
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       const scope = facilityScope(ctx);
+      // Busca pelo nome do paciente: na lista do celular é assim que se acha
+      // o resultado de quem está na mesa, sem rolar dezenas de pedidos.
+      const pattern = params.q ? `%${params.q.replace(/[%_\\]/g, (char) => `\\${char}`)}%` : null;
       const orders = await tx.query<OrderRow>(
         `SELECT ${ORDER_SELECT}
          ${ORDER_FROM}
@@ -99,6 +102,7 @@ export class ExamsService {
             AND ($4::text IS NULL OR o.status = $4)
             AND ($5::boolean IS NOT TRUE OR o.status IN ('ordered', 'partially_resulted', 'resulted'))
             AND ($6::uuid[] IS NULL OR o.facility_id = ANY($6))
+            AND ($8::text IS NULL OR p.name ILIKE $8)
           ORDER BY o.ordered_at DESC
           LIMIT $7`,
         [
@@ -109,6 +113,7 @@ export class ExamsService {
           params.pending ?? null,
           scope,
           params.limit,
+          pattern,
         ],
       );
       if (orders.rows.length === 0) return { items: [] };

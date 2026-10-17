@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import {
   addressSchema,
-  documentNumberSchema,
+  type IdentityDocumentKind,
   emailSchema,
   isoDateSchema,
   isoDateTimeSchema,
   moneySchema,
   nameSchema,
+  normalizeDocument,
   paginationQuerySchema,
   phoneSchema,
   shortTextSchema,
@@ -56,17 +57,20 @@ export const guardianSchema = z.object({
   notes: z.string().nullable(),
   tags: z.array(z.string()),
   patientCount: z.number().int().nonnegative().optional(),
+  /** Tutor inativo continua consultável, mas não entra em vínculo novo nem em seletor. */
+  inactiveAt: isoDateTimeSchema.nullable(),
+  inactiveReason: z.string().nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
 });
 export type Guardian = z.infer<typeof guardianSchema>;
 
-export const createGuardianSchema = z.object({
+const guardianFieldsSchema = z.object({
   personType: personTypeSchema.default('individual'),
   name: nameSchema,
   legalName: z.string().trim().max(200).optional(),
   documentKind: z.enum(['cpf', 'cnpj', 'passport', 'none']).default('none'),
-  document: documentNumberSchema.optional(),
+  document: z.string().trim().max(40).optional(),
   email: emailSchema.optional(),
   phonePrimary: phoneSchema.optional(),
   phoneSecondary: phoneSchema.optional(),
@@ -75,13 +79,48 @@ export const createGuardianSchema = z.object({
   notes: z.string().trim().max(4000).optional(),
   tags: z.array(z.string().trim().max(40)).max(20).default([]),
 });
+
+/** O número só faz sentido junto do tipo: CPF e CNPJ conferem os dígitos, passaporte guarda letras. */
+function checkDocument<T extends { documentKind?: IdentityDocumentKind; document?: string }>(
+  value: T,
+  ctx: z.RefinementCtx,
+): T {
+  if (!value.document) return { ...value, document: undefined };
+  if (!value.documentKind) {
+    ctx.addIssue({ code: 'custom', path: ['documentKind'], message: 'Informe o tipo do documento.' });
+    return z.NEVER;
+  }
+  const result = normalizeDocument(value.documentKind, value.document);
+  if ('error' in result) {
+    ctx.addIssue({ code: 'custom', path: ['document'], message: result.error });
+    return z.NEVER;
+  }
+  return { ...value, document: result.value };
+}
+
+export const createGuardianSchema = guardianFieldsSchema.transform(checkDocument);
 export type CreateGuardian = z.infer<typeof createGuardianSchema>;
 
-export const updateGuardianSchema = createGuardianSchema.partial();
+export const updateGuardianSchema = guardianFieldsSchema.partial().transform(checkDocument);
 
 export const listGuardiansQuerySchema = paginationQuerySchema.extend({
   q: z.string().trim().max(120).optional(),
+  /** Sem filtro vêm todos; seletores pedem só os ativos. */
+  status: z.enum(['active', 'inactive']).optional(),
 });
+export type ListGuardiansQuery = z.infer<typeof listGuardiansQuerySchema>;
+
+/** Motivo de inativação de cadastro: fica na ficha e na auditoria. */
+export const inactivationReasonSchema = z
+  .string()
+  .trim()
+  .min(2, 'Informe o motivo.')
+  .max(300, 'Use no máximo 300 caracteres.');
+
+export const inactivateGuardianSchema = z.object({
+  reason: inactivationReasonSchema,
+});
+export type InactivateGuardian = z.infer<typeof inactivateGuardianSchema>;
 
 // --------------------------------------------------------------- taxonomy
 export const speciesSchema = z.object({
@@ -145,7 +184,10 @@ export const patientGuardianLinkSchema = z.object({
   guardianEmail: z.string().nullable(),
   role: guardianRoleSchema,
   isPrimary: z.boolean(),
+  /** Tutor inativado continua vinculado; a ficha sinaliza para a recepção atualizar. */
+  guardianInactive: z.boolean().optional(),
 });
+export type PatientGuardianLink = z.infer<typeof patientGuardianLinkSchema>;
 
 export const patientIdentifierSchema = z.object({
   id: uuidSchema,
@@ -173,11 +215,16 @@ export const patientAlertSchema = z.object({
 
 export const patientProblemSchema = z.object({
   id: uuidSchema,
+  patientId: uuidSchema,
+  conditionId: uuidSchema.nullable(),
   description: z.string(),
   status: problemStatusSchema,
   onsetAt: isoDateTimeSchema.nullable(),
   resolvedAt: isoDateTimeSchema.nullable(),
+  sourceEncounterId: uuidSchema.nullable(),
+  createdAt: isoDateTimeSchema,
 });
+export type PatientProblem = z.infer<typeof patientProblemSchema>;
 
 export const patientSchema = z.object({
   id: uuidSchema,
@@ -202,6 +249,9 @@ export const patientSchema = z.object({
   currentWeightKg: z.string().nullable(),
   currentWeightAt: isoDateTimeSchema.nullable(),
   status: patientStatusSchema,
+  /** Preenchidos enquanto o cadastro está inativo ou transferido. */
+  inactiveReason: z.string().nullable(),
+  inactivatedAt: isoDateTimeSchema.nullable(),
   noKnownAllergies: z.boolean(),
   attributes: z.record(z.string(), z.unknown()),
   notes: z.string().nullable(),
@@ -268,26 +318,67 @@ export const createPatientSchema = z.object({
 });
 export type CreatePatient = z.infer<typeof createPatientSchema>;
 
+// A situação do cadastro não muda por aqui: inativar e reativar têm rota com
+// motivo, e o óbito tem fluxo próprio que fecha agenda e lembretes.
 export const updatePatientSchema = createPatientSchema
   .omit({ guardians: true, newGuardian: true, identifiers: true, weightKg: true })
   .partial()
   .extend({
-    status: patientStatusSchema.optional(),
     noKnownAllergies: z.boolean().optional(),
   });
 
 export const listPatientsQuerySchema = paginationQuerySchema.extend({
   q: z.string().trim().max(120).optional(),
   speciesId: uuidSchema.optional(),
-  status: patientStatusSchema.optional(),
+  /** Um ou mais, separados por vírgula: `inactive,transferred` lista quem saiu da clínica. */
+  status: z
+    .string()
+    .transform((value) =>
+      value
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean),
+    )
+    .pipe(z.array(patientStatusSchema).min(1))
+    .optional(),
   guardianId: uuidSchema.optional(),
 });
+export type ListPatientsQuery = z.infer<typeof listPatientsQuerySchema>;
 
-export const addPatientGuardianSchema = z.object({
-  guardianId: uuidSchema,
-  role: guardianRoleSchema.default('owner'),
-  isPrimary: z.boolean().default(false),
+/** Vincula tutor já cadastrado ou cadastra um novo na mesma transação. */
+export const addPatientGuardianSchema = z
+  .object({
+    guardianId: uuidSchema.optional(),
+    newGuardian: createGuardianSchema.optional(),
+    role: guardianRoleSchema.default('owner'),
+    isPrimary: z.boolean().default(false),
+  })
+  .refine((value) => Boolean(value.guardianId) !== Boolean(value.newGuardian), {
+    message: 'Escolha um tutor cadastrado ou informe os dados de um novo.',
+    path: ['guardianId'],
+  });
+export type AddPatientGuardian = z.infer<typeof addPatientGuardianSchema>;
+
+export const addPatientIdentifierSchema = z.object({
+  scheme: patientIdentifierSchemeSchema,
+  value: z.string().trim().min(1, 'Informe o número.').max(80),
+  issuer: z.string().trim().max(80).optional(),
 });
+export type AddPatientIdentifier = z.infer<typeof addPatientIdentifierSchema>;
+
+export const inactivatePatientSchema = z.object({
+  reason: inactivationReasonSchema,
+  /** Foi para outra clínica: a situação fica "transferido" em vez de "inativo". */
+  transferred: z.boolean().default(false),
+});
+export type InactivatePatient = z.infer<typeof inactivatePatientSchema>;
+
+/** Alergia não se apaga: sai da lista ativa como inativa (passou) ou refutada (não era alergia). */
+export const updateAllergyStatusSchema = z.object({
+  status: z.enum(['inactive', 'refuted']),
+  reason: z.string().trim().max(300).optional(),
+});
+export type UpdateAllergyStatus = z.infer<typeof updateAllergyStatusSchema>;
 
 export const createAllergySchema = z.object({
   substance: shortTextSchema,
@@ -373,7 +464,11 @@ export const createServiceSchema = z.object({
   active: z.boolean().default(true),
 });
 
-export const updateServiceSchema = createServiceSchema.partial().omit({ key: true });
+export const updateServiceSchema = createServiceSchema
+  .partial()
+  .omit({ key: true })
+  // nulo apaga o preço; ausente mantém o que está
+  .extend({ defaultPrice: moneySchema.nullable().optional() });
 
 // ----------------------------------------------------------------- busca
 export const searchResultSchema = z.object({

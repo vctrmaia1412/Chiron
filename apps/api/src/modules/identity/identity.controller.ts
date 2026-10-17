@@ -5,10 +5,12 @@ import {
   forgotPasswordRequestSchema,
   loginRequestSchema,
   resetPasswordRequestSchema,
+  signupRequestSchema,
   stepUpRequestSchema,
   switchContextRequestSchema,
 } from '@chiron/contracts';
 import { IdentityService } from './identity.service';
+import { ProvisioningService } from '../tenant/provisioning.service';
 import { AllowNoTenant, Public } from '../../auth/authorize.decorator';
 import { zBody } from '../../common/zod-validation.pipe';
 import { env } from '../../config/env';
@@ -18,7 +20,29 @@ import { logger } from '../../common/logger';
 
 @Controller()
 export class IdentityController {
-  constructor(private readonly identity: IdentityService) {}
+  constructor(
+    private readonly identity: IdentityService,
+    private readonly provisioning: ProvisioningService,
+  ) {}
+
+  /** "Criar conta": cria a clínica e já devolve a sessão, como o login. */
+  @Post('auth/signup')
+  @Public()
+  async signup(
+    @Body(zBody(signupRequestSchema)) body: ReturnType<typeof signupRequestSchema.parse>,
+    @Req() req: AuthedRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const meta = {
+      ip: req.ip ?? null,
+      userAgent: (req.headers['user-agent'] as string) ?? null,
+      requestId: req.requestId,
+    };
+    const created = await this.provisioning.signup(body, meta);
+    const result = await this.identity.login({ email: created.email, password: body.password, client: 'web' }, meta);
+    void reply.setCookie(env().COOKIE_NAME, result.token, this.identity.cookieOptions(result.expiresAt));
+    return result.response;
+  }
 
   @Post('auth/login')
   @Public()
@@ -69,6 +93,13 @@ export class IdentityController {
       requestId: req.requestId,
     });
     return { ok: true };
+  }
+
+  /** Prévia pública do convite, para a tela de aceite. Mesma cota das rotas de autenticação. */
+  @Get('auth/invitations/:token')
+  @Public()
+  async previewInvitation(@Param('token') token: string) {
+    return this.identity.previewInvitation(token);
   }
 
   @Post('auth/invitations/accept')

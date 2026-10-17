@@ -24,6 +24,10 @@ export function MobileNav() {
   const primary = available.filter((item) => item.primary).slice(0, 4);
   const rest = available.filter((item) => !primary.includes(item));
 
+  // Dentro de um atendimento a barra inferior é a de ações clínicas, que a
+  // própria tela desenha no mesmo lugar e com a mesma altura.
+  if (/^\/atendimentos\/[^/]+$/.test(pathname)) return null;
+
   return (
     <>
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border)] bg-[var(--surface)] lg:hidden">

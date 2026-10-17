@@ -6,6 +6,7 @@ export * from './auth';
 export * from './registry';
 export * from './scheduling';
 export * from './clinical';
+export * from './charting';
 export * from './lab';
 export * from './immunization';
 export * from './documents';

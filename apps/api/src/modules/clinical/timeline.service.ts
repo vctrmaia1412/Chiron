@@ -95,7 +95,9 @@ const TIMELINE_SQL = `
      WHERE er.tenant_id = $1 AND er.patient_id = $2 AND er.status <> 'entered_in_error'
 
     UNION ALL
-    SELECT i.id::text, 'immunization.applied', i.administered_at, 'Vacina aplicada', i.vaccine_name,
+    SELECT i.id::text, 'immunization.applied', i.administered_at,
+           CASE WHEN i.administered_elsewhere THEN 'Vacina aplicada em outro local' ELSE 'Vacina aplicada' END,
+           i.vaccine_name,
            'basic', i.encounter_id, 'immunization.immunizations', i.id, prof.name
       FROM immunization.immunizations i
       LEFT JOIN registry.professionals prof ON prof.id = i.professional_id AND prof.tenant_id = i.tenant_id
@@ -109,7 +111,7 @@ const TIMELINE_SQL = `
            pt.product_name, 'basic', pt.encounter_id, 'immunization.preventive_treatments', pt.id, prof.name
       FROM immunization.preventive_treatments pt
       LEFT JOIN registry.professionals prof ON prof.id = pt.professional_id AND prof.tenant_id = pt.tenant_id
-     WHERE pt.tenant_id = $1 AND pt.patient_id = $2
+     WHERE pt.tenant_id = $1 AND pt.patient_id = $2 AND pt.status = 'completed'
 
     UNION ALL
     SELECT doc.id::text, 'document.attached', doc.created_at, 'Documento', doc.title, 'basic',
@@ -139,6 +141,7 @@ const TIMELINE_SQL = `
   ) t
   WHERE t.occurred_at IS NOT NULL
     AND ($3::timestamptz IS NULL OR t.occurred_at < $3)
+    AND ($5::text[] IS NULL OR t.kind = ANY($5))
   ORDER BY t.occurred_at DESC
   LIMIT $4
 `;
@@ -158,6 +161,11 @@ export class TimelineService {
     return this.db.withTenant(contextToTenantContext(ctx), async (tx) => {
       await this.assertPatient(tx, ctx, patientId);
 
+      // O filtro por tipo vai para a consulta: aplicado depois do LIMIT, pedir
+      // "os 10 últimos eventos clínicos" devolvia os 10 últimos de qualquer
+      // tipo e jogava fora os que não eram clínicos.
+      const filterKinds = params.kinds?.split(',').filter(Boolean) ?? null;
+
       const { rows } = await tx.query<{
         id: string;
         kind: string;
@@ -169,17 +177,14 @@ export class TimelineService {
         source_table: string;
         source_id: string;
         actor_name: string | null;
-      }>(TIMELINE_SQL, [ctx.tenantId, patientId, params.cursor ?? null, params.limit + 1]);
+      }>(TIMELINE_SQL, [ctx.tenantId, patientId, params.cursor ?? null, params.limit + 1, filterKinds]);
 
       const canReadSensitive = ctx.permissions.has('record:read_sensitive');
-      const filterKinds = params.kinds?.split(',').filter(Boolean);
 
       const hasMore = rows.length > params.limit;
       const page = hasMore ? rows.slice(0, params.limit) : rows;
 
-      const items: TimelineItem[] = page
-        .filter((r) => !filterKinds || filterKinds.includes(r.kind))
-        .map((r) => {
+      const items: TimelineItem[] = page.map((r) => {
           const sensitive = r.sensitivity === 'sensitive';
           return {
             id: r.id,
@@ -215,6 +220,7 @@ export class TimelineService {
         class: string;
         status: string;
         service_name: string | null;
+        service_category: string | null;
         professional_id: string | null;
         professional_name: string | null;
         appointment_id: string | null;
@@ -232,7 +238,7 @@ export class TimelineService {
         guardian_name: string | null;
       }>(
         `SELECT e.id, e.number::text AS number, e.facility_id, e.class, e.status,
-                sc.name AS service_name, pr.id AS professional_id, pr.name AS professional_name,
+                sc.name AS service_name, sc.category AS service_category, pr.id AS professional_id, pr.name AS professional_name,
                 e.appointment_id, e.arrived_at, e.started_at, e.ended_at, e.chief_complaint,
                 e.primary_diagnosis_summary, e.disposition, e.created_at,
                 p.name AS patient_name, s.name_pt AS species_name, b.name AS breed_name,
@@ -349,6 +355,7 @@ export class TimelineService {
             class: e.class as never,
             status: e.status as never,
             serviceName: e.service_name,
+            serviceCategory: e.service_category,
             attendingProfessional: e.professional_id
               ? { id: e.professional_id, name: e.professional_name ?? '' }
               : null,

@@ -42,6 +42,8 @@ export const encounterSummarySchema = z.object({
   class: encounterClassSchema,
   status: encounterStatusSchema,
   serviceName: z.string().nullable(),
+  /** Categoria do serviço (consulta, vacinação, retorno...), usada para sugerir o modelo de registro. */
+  serviceCategory: z.string().nullable(),
   attendingProfessional: z.object({ id: uuidSchema, name: z.string() }).nullable(),
   appointmentId: uuidSchema.nullable(),
   arrivedAt: isoDateTimeSchema.nullable(),
@@ -198,6 +200,8 @@ export const createDiagnosisSchema = z.object({
   kind: diagnosisKindSchema.default('presumptive'),
   rank: z.number().int().min(1).max(20).default(1),
   notes: z.string().trim().max(1000).optional(),
+  /** Leva o diagnóstico para a lista de problemas do paciente na mesma operação. */
+  addToProblems: z.enum(['active', 'chronic']).optional(),
 });
 
 export const createProcedureSchema = z.object({
@@ -236,6 +240,11 @@ export const listEncountersQuerySchema = paginationQuerySchema.extend({
   to: isoDateTimeSchema.optional(),
   q: z.string().trim().max(120).optional(),
   open: queryBoolean.optional(),
+  /**
+   * Etapa da fila: `waiting` (chegou ou triado), `active` (em curso ou pausado)
+   * e `stale` (aberto há mais de um dia, esquecido sem finalizar).
+   */
+  stage: z.enum(['waiting', 'active', 'stale']).optional(),
 });
 
 // ----------------------------------------------------------- prescription

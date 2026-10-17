@@ -54,6 +54,10 @@ const baseEnvSchema = z.object({
   /** Origens extras permitidas, separadas por vírgula (proxy, domínio alternativo). */
   EXTRA_ALLOWED_ORIGINS: z.string().default(''),
   API_PREFIX: z.string().default('/api/v1'),
+  /** Cadastro aberto ("Criar conta"): cada pessoa cria a própria clínica. Desligue para só convidar. */
+  SIGNUP_ENABLED: envBoolean(true),
+  /** Clínicas criadas pelo mesmo IP por hora: freio contra robô sem CAPTCHA. */
+  SIGNUP_PER_IP_PER_HOUR: z.coerce.number().int().min(1).default(5),
 
   SESSION_SECRET: z.string().min(32),
   SESSION_TTL_HOURS: z.coerce.number().int().default(12),
@@ -67,6 +71,10 @@ const baseEnvSchema = z.object({
 
   RATE_LIMIT_LOGIN_PER_MIN: z.coerce.number().int().default(10),
   RATE_LIMIT_PUBLIC_PER_MIN: z.coerce.number().int().default(60),
+  // Cota de quem chega com cookie de sessão, por IP. Uma clínica inteira sai
+  // por um IP só, e uma tela de atendimento faz dez requisições ao abrir: a
+  // cota anônima de 60 por minuto travaria a equipe no meio da consulta.
+  RATE_LIMIT_AUTHENTICATED_PER_MIN: z.coerce.number().int().default(600),
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 

@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Search, X } from 'lucide-react';
+import { Check, Plus, Search, X } from 'lucide-react';
 import type { PatientListItem } from '@chiron/contracts';
 import { api } from '@/lib/api';
 import { formatWeight } from '@/lib/format';
+import { useSession } from '@/lib/session';
 import { Field, Input } from '@/components/ui/field';
+import { PatientFormSheet } from './patient-form';
 
 export interface PatientPickerValue {
   id: string;
@@ -21,15 +23,22 @@ export function PatientPicker({
   onChange,
   error,
   label = 'Paciente',
+  allowCreate = false,
 }: {
   value: PatientPickerValue | null;
   onChange: (value: PatientPickerValue | null) => void;
   error?: string;
   label?: string;
+  /** Cliente novo ao telefone: cadastra o animal (e o tutor) sem sair do formulário. */
+  allowCreate?: boolean;
 }) {
   const [term, setTerm] = useState('');
   const [debounced, setDebounced] = useState('');
   const [focused, setFocused] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const inputId = useId();
+  const { can } = useSession();
+  const canCreate = allowCreate && can('patient:create');
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(term.trim()), 220);
@@ -72,10 +81,13 @@ export function PatientPicker({
   const items = data?.items ?? [];
 
   return (
-    <Field label={label} error={error}>
+    <>
+    <Field label={label} error={error} htmlFor={inputId}>
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-3)]" />
         <Input
+          id={inputId}
+          data-sheet-ignore
           value={term}
           onChange={(event) => setTerm(event.target.value)}
           onFocus={() => setFocused(true)}
@@ -89,7 +101,9 @@ export function PatientPicker({
             {isFetching && items.length === 0 ? (
               <p className="px-3 py-3 text-[13px] text-[var(--ink-3)]">Buscando...</p>
             ) : items.length === 0 ? (
-              <p className="px-3 py-3 text-[13px] text-[var(--ink-3)]">Nenhum paciente encontrado.</p>
+              <p className="px-3 py-3 text-[13px] text-[var(--ink-3)]">
+                Nenhum paciente encontrado.{canCreate ? ' Cadastre abaixo.' : ''}
+              </p>
             ) : (
               <ul>
                 {items.map((patient) => (
@@ -122,6 +136,36 @@ export function PatientPicker({
           </div>
         )}
       </div>
+      {canCreate && (
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => setCreating(true)}
+          className="mt-1.5 flex min-h-10 items-center gap-1.5 text-[13.5px] font-medium text-[var(--brand)]"
+        >
+          <Plus className="h-4 w-4" />
+          {term.trim().length >= 2 ? `Cadastrar "${term.trim()}" como paciente novo` : 'Cadastrar paciente novo'}
+        </button>
+      )}
     </Field>
+    {canCreate && (
+      <PatientFormSheet
+        open={creating}
+        onOpenChange={setCreating}
+        defaultName={term.trim()}
+        onSaved={(saved) => {
+          const primary = saved.guardians.find((guardian) => guardian.isPrimary) ?? saved.guardians[0];
+          onChange({
+            id: saved.id,
+            name: saved.name,
+            guardianId: primary?.guardianId ?? null,
+            speciesName: saved.species.namePt,
+            weightKg: saved.currentWeightKg,
+          });
+          setTerm('');
+        }}
+      />
+    )}
+    </>
   );
 }
